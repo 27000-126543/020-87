@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  AlertTriangle,
   XCircle,
   Copy,
   Clock,
@@ -15,15 +14,17 @@ import {
   CheckCircle,
   ThumbsUp,
   ThumbsDown,
-  CalendarDays
+  CalendarDays,
+  Info,
+  type LucideIcon
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAnomalyStore } from '@/store/useAnomalyStore';
 import { stores } from '@/data';
 import { cn } from '@/lib/utils';
-import type { AnomalyType, Anomaly, AnomalyStatus, CorrectionStatus } from '@/types';
+import type { AnomalyType, Anomaly, AnomalyStatus, CorrectionStatus, ExpiryRiskLevel } from '@/types';
 
-const anomalyTypeConfig: Record<AnomalyType, { label: string; icon: any; color: string; bg: string; border: string }> = {
+const anomalyTypeConfig: Record<AnomalyType, { label: string; icon: LucideIcon; color: string; bg: string; border: string }> = {
   missing: {
     label: '批号缺失',
     icon: FileQuestion,
@@ -72,6 +73,12 @@ const correctionStatusConfig: Record<CorrectionStatus, { label: string; variant:
   approved: { label: '已通过', variant: 'success' },
 };
 
+const riskLevelConfig: Record<ExpiryRiskLevel, { label: string; variant: 'danger' | 'warning' | 'success' }> = {
+  expired: { label: '已过期', variant: 'danger' },
+  near_expiry: { label: '临近过期', variant: 'warning' },
+  normal: { label: '正常', variant: 'success' },
+};
+
 function getCorrectionsSummary(corrections: Anomaly['corrections']): { label: string; variant: 'warning' | 'danger' | 'success' | 'default'; count: number } | null {
   if (corrections.length === 0) return null;
 
@@ -107,6 +114,8 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   const [selectedCorrectionId, setSelectedCorrectionId] = useState<string | null>(null);
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
+  const [resolveNote, setResolveNote] = useState('');
   const { addCorrection, resolveAnomaly, rejectCorrection, approveCorrection } = useAnomalyStore();
 
   const handleSend = () => {
@@ -129,7 +138,19 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
 
   const handleResolve = () => {
     if (!anomaly) return;
-    resolveAnomaly(anomaly.id);
+    setResolveDialogOpen(true);
+  };
+
+  const handleConfirmResolve = () => {
+    if (!anomaly || !resolveNote.trim()) return;
+    resolveAnomaly(anomaly.id, resolveNote.trim());
+    setResolveDialogOpen(false);
+    setResolveNote('');
+  };
+
+  const handleCancelResolve = () => {
+    setResolveDialogOpen(false);
+    setResolveNote('');
   };
 
   const handleApprove = (correctionId: string) => {
@@ -313,7 +334,7 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
                   </div>
                 )}
 
-                {correction.status === 'pending_review' && (
+                {anomaly.status !== 'resolved' && correction.status === 'pending_review' && (
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       onClick={() => handleApprove(correction.id)}
@@ -361,6 +382,33 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
                 )}
               </div>
             ))}
+
+            {anomaly.status === 'resolved' && anomaly.resolvedAt && (
+              <div className="p-4 bg-emerald-600/10 border border-emerald-500/30 rounded-lg space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-emerald-600 rounded-full">
+                    <CheckCircle2 className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-sm font-semibold text-emerald-400">异常已关闭</p>
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-emerald-300/70">关闭人</span>
+                    <span className="text-emerald-200">{anomaly.resolvedBy}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-emerald-300/70">关闭时间</span>
+                    <span className="text-emerald-200">{anomaly.resolvedAt}</span>
+                  </div>
+                  {anomaly.resolvedNote && (
+                    <div className="pt-2 mt-2 border-t border-emerald-500/20">
+                      <p className="text-emerald-300/70 mb-1">结案说明</p>
+                      <p className="text-emerald-200">{anomaly.resolvedNote}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -410,6 +458,37 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           </button>
         </div>
       </div>
+
+      {resolveDialogOpen && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+          <div className="bg-slate-800 border border-slate-600 rounded-lg p-4 w-72 space-y-3 shadow-2xl">
+            <p className="text-sm font-medium text-white">关闭异常</p>
+            <p className="text-xs text-slate-400">请输入结案说明</p>
+            <textarea
+              value={resolveNote}
+              onChange={(e) => setResolveNote(e.target.value)}
+              placeholder="请输入结案说明..."
+              rows={3}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={handleCancelResolve}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-md transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmResolve}
+                disabled={!resolveNote.trim()}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-md transition-colors"
+              >
+                确认关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -434,6 +513,8 @@ export function Anomalies() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [storeDropdownOpen, setStoreDropdownOpen] = useState(false);
+  const [showJudgementDialog, setShowJudgementDialog] = useState(false);
+  const [judgementAnomaly, setJudgementAnomaly] = useState<Anomaly | null>(null);
 
   useEffect(() => {
     computeStats();
@@ -448,6 +529,16 @@ export function Anomalies() {
     if (activeAnomalyId) {
       addMessage(activeAnomalyId, content, '质控总部');
     }
+  };
+
+  const handleOpenJudgementDialog = (anomaly: Anomaly) => {
+    setJudgementAnomaly(anomaly);
+    setShowJudgementDialog(true);
+  };
+
+  const handleCloseJudgementDialog = () => {
+    setShowJudgementDialog(false);
+    setJudgementAnomaly(null);
   };
 
   const statusOptions: { value: AnomalyStatus | null; label: string }[] = [
@@ -698,38 +789,39 @@ export function Anomalies() {
                     </td>
                     <td className="px-5 py-4 max-w-xs">
                       <p className="text-sm text-slate-300">{anomaly.description}</p>
-                      {anomaly.type === 'expiry' && (
+                      {anomaly.type === 'expiry' && anomaly.expiryDetail && (
+                        <div className="mt-1.5 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <StatusBadge variant={riskLevelConfig[anomaly.expiryDetail.riskLevel].variant}>
+                              {riskLevelConfig[anomaly.expiryDetail.riskLevel].label}
+                            </StatusBadge>
+                            <button
+                              onClick={() => handleOpenJudgementDialog(anomaly)}
+                              className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 transition-colors"
+                            >
+                              <Info className="w-3 h-3" />
+                              <span>查看判断逻辑</span>
+                            </button>
+                          </div>
+                          <p className="text-xs text-slate-500">{anomaly.expiryDetail.judgement}</p>
+                        </div>
+                      )}
+                      {anomaly.type === 'expiry' && !anomaly.expiryDetail && (
                         <div className="mt-1.5 space-y-0.5">
-                          {anomaly.expiryDetail ? (
-                            <>
+                          <>
+                            {anomaly.surgeryDate && (
                               <div className="flex items-center gap-1 text-xs text-slate-500">
                                 <CalendarDays className="w-3 h-3" />
-                                <span>手术日期: {anomaly.expiryDetail.caseSurgeryDate}</span>
+                                <span>手术日期: {anomaly.surgeryDate}</span>
                               </div>
+                            )}
+                            {anomaly.batchExpiryDate && (
                               <div className="flex items-center gap-1 text-xs text-slate-500">
                                 <CalendarDays className="w-3 h-3" />
-                                <span>批次有效期: {anomaly.expiryDetail.batchExpiryDate}</span>
+                                <span>批次有效期: {anomaly.batchExpiryDate}</span>
                               </div>
-                              <div className="text-xs text-slate-400">
-                                {anomaly.expiryDetail.daysDiff}天 · {anomaly.expiryDetail.expiredAtSurgery ? '手术时已过期' : '距过期尚远'}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              {anomaly.surgeryDate && (
-                                <div className="flex items-center gap-1 text-xs text-slate-500">
-                                  <CalendarDays className="w-3 h-3" />
-                                  <span>手术日期: {anomaly.surgeryDate}</span>
-                                </div>
-                              )}
-                              {anomaly.batchExpiryDate && (
-                                <div className="flex items-center gap-1 text-xs text-slate-500">
-                                  <CalendarDays className="w-3 h-3" />
-                                  <span>批次有效期: {anomaly.batchExpiryDate}</span>
-                                </div>
-                              )}
-                            </>
-                          )}
+                            )}
+                          </>
                         </div>
                       )}
                     </td>
@@ -772,6 +864,50 @@ export function Anomalies() {
           </div>
         )}
       </div>
+
+      {showJudgementDialog && judgementAnomaly?.expiryDetail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 border border-slate-600 rounded-lg p-5 w-96 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-white">有效期异常判断逻辑</p>
+              <button
+                onClick={handleCloseJudgementDialog}
+                className="p-1 hover:bg-slate-700 rounded transition-colors"
+              >
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-700/50">
+                <span className="text-slate-400">手术日期</span>
+                <span className="text-slate-200">{judgementAnomaly.expiryDetail.caseSurgeryDate}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-700/50">
+                <span className="text-slate-400">批次有效期</span>
+                <span className="text-slate-200">{judgementAnomaly.expiryDetail.batchExpiryDate}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-700/50">
+                <span className="text-slate-400">天数差</span>
+                <span className="text-slate-200">{judgementAnomaly.expiryDetail.daysDiff} 天</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-700/50">
+                <span className="text-slate-400">阈值</span>
+                <span className="text-slate-200">{judgementAnomaly.expiryDetail.nearExpiryThreshold} 天</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-700/50">
+                <span className="text-slate-400">风险等级</span>
+                <StatusBadge variant={riskLevelConfig[judgementAnomaly.expiryDetail.riskLevel].variant}>
+                  {riskLevelConfig[judgementAnomaly.expiryDetail.riskLevel].label}
+                </StatusBadge>
+              </div>
+              <div className="pt-2">
+                <span className="text-slate-400 text-xs">判断结果</span>
+                <p className="text-slate-200 mt-1">{judgementAnomaly.expiryDetail.judgement}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <MessagePanel
         anomaly={activeAnomaly}

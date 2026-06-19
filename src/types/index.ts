@@ -55,6 +55,9 @@ export interface PatientCase {
     contactedAt?: string;
     note?: string;
   };
+  recallOwner?: string;
+  plannedReviewDate?: string;
+  contactNotes?: string;
 }
 
 export type AnomalyType = 'missing' | 'duplicate' | 'expiry' | 'unbound';
@@ -84,6 +87,8 @@ export interface Correction {
   reviewedAt?: string;
 }
 
+export type ExpiryRiskLevel = 'expired' | 'near_expiry' | 'normal';
+
 export interface ExpiryAnomalyDetail {
   batchId: string;
   batchNumber: string;
@@ -93,6 +98,8 @@ export interface ExpiryAnomalyDetail {
   daysDiff: number;
   expiredAtSurgery: boolean;
   nearExpiryThreshold: number;
+  riskLevel: ExpiryRiskLevel;
+  judgement: string;
 }
 
 export interface Anomaly {
@@ -112,6 +119,9 @@ export interface Anomaly {
   status: AnomalyStatus;
   messages: Message[];
   corrections: Correction[];
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolvedNote?: string;
 }
 
 export interface RiskTrendPoint {
@@ -230,6 +240,12 @@ export interface TrackingCase {
     contactedAt?: string;
     note?: string;
   };
+  recallOwner?: string;
+  plannedReviewDate?: string;
+  contactNotes?: string;
+  storeId: string;
+  storeName: string;
+  batchNumber: string;
 }
 
 export interface AnomalyStats {

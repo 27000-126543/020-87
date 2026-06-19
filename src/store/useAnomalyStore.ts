@@ -9,6 +9,7 @@ interface AnomalyState {
   selectedStatus: AnomalyStatus | null;
   activeAnomalyId: string | null;
   stats: AnomalyStats;
+  trendFilter: { storeId: string | null; brandId: string | null; month: string | null } | null;
   setSelectedType: (type: AnomalyType | null) => void;
   setSelectedStore: (storeId: string | null) => void;
   setSelectedStatus: (status: AnomalyStatus | null) => void;
@@ -17,10 +18,12 @@ interface AnomalyState {
   addCorrection: (anomalyId: string, note: string, attachmentName: string, submittedBy: string) => void;
   rejectCorrection: (anomalyId: string, correctionId: string, reviewNote: string) => void;
   approveCorrection: (anomalyId: string, correctionId: string) => void;
-  resolveAnomaly: (anomalyId: string) => void;
+  resolveAnomaly: (anomalyId: string, note: string) => void;
   updateAnomalyStatus: (anomalyId: string, status: AnomalyStatus) => void;
   getFilteredAnomalies: () => Anomaly[];
   computeStats: () => void;
+  setTrendFilter: (filter: { storeId: string | null; brandId: string | null; month: string | null } | null) => void;
+  closeAnomaly: (anomalyId: string, note: string) => void;
 }
 
 function computeAnomalyStats(anomalyList: Anomaly[]): AnomalyStats {
@@ -39,6 +42,7 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
   selectedStatus: null,
   activeAnomalyId: null,
   stats: { missing: 0, duplicate: 0, expiry: 0, unbound: 0 },
+  trendFilter: null,
 
   setSelectedType: (type) => set({ selectedType: type }),
   setSelectedStore: (storeId) => set({ selectedStore: storeId }),
@@ -147,13 +151,25 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     get().computeStats();
   },
 
-  resolveAnomaly: (anomalyId) => {
+  resolveAnomaly: (anomalyId, note) => {
     set((state) => ({
       anomalies: state.anomalies.map((a) =>
-        a.id === anomalyId ? { ...a, status: 'resolved' as AnomalyStatus } : a
+        a.id === anomalyId
+          ? {
+              ...a,
+              status: 'resolved' as AnomalyStatus,
+              resolvedAt: new Date().toLocaleString('zh-CN'),
+              resolvedBy: '质控总部',
+              resolvedNote: note,
+            }
+          : a
       ),
     }));
     get().computeStats();
+  },
+
+  closeAnomaly: (anomalyId, note) => {
+    get().resolveAnomaly(anomalyId, note);
   },
 
   updateAnomalyStatus: (anomalyId, status) => {
@@ -166,7 +182,7 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
   },
 
   getFilteredAnomalies: () => {
-    const { anomalies, selectedType, selectedStore, selectedStatus } = get();
+    const { anomalies, selectedType, selectedStore, selectedStatus, trendFilter } = get();
     let filtered = [...anomalies];
 
     if (selectedType) {
@@ -177,6 +193,9 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     }
     if (selectedStatus) {
       filtered = filtered.filter((a) => a.status === selectedStatus);
+    }
+    if (trendFilter && trendFilter.storeId) {
+      filtered = filtered.filter((a) => a.storeId === trendFilter.storeId);
     }
 
     return filtered.sort((a, b) => {
@@ -193,5 +212,13 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     const { anomalies } = get();
     const stats = computeAnomalyStats(anomalies);
     set({ stats });
+  },
+
+  setTrendFilter: (filter) => {
+    set({ trendFilter: filter });
+    if (filter && filter.storeId) {
+      get().setSelectedStore(filter.storeId);
+    }
+    get().computeStats();
   },
 }));

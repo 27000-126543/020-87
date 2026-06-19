@@ -1,4 +1,98 @@
-import type { Anomaly, Correction } from '@/types';
+import type { Anomaly, Correction, ExpiryAnomalyDetail, ExpiryRiskLevel } from '@/types';
+import { patientCases, implantBatches, doctors } from '@/data';
+
+const NEAR_EXPIRY_THRESHOLD = 90;
+
+function parseDate(dateStr: string): Date {
+  return new Date(dateStr.replace(/-/g, '/'));
+}
+
+function daysBetween(date1: string, date2: string): number {
+  const d1 = parseDate(date1);
+  const d2 = parseDate(date2);
+  const diff = d2.getTime() - d1.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+function buildExpiryAnomalyDetail(
+  caseItem: typeof patientCases[0],
+  batch: typeof implantBatches[0]
+): ExpiryAnomalyDetail {
+  const daysDiff = daysBetween(caseItem.surgeryDate, batch.expiryDate);
+  const expiredAtSurgery = daysDiff <= 0;
+  const nearExpiry = daysDiff > 0 && daysDiff <= NEAR_EXPIRY_THRESHOLD;
+  let riskLevel: ExpiryRiskLevel = 'normal';
+  let judgement = '';
+
+  if (expiredAtSurgery) {
+    riskLevel = 'expired';
+    judgement = `手术时种植体已过期 ${Math.abs(daysDiff)} 天，属于严重质量问题`;
+  } else if (nearExpiry) {
+    riskLevel = 'near_expiry';
+    judgement = `种植体距过期仅 ${daysDiff} 天，临近有效期，建议优先使用并密切关注`;
+  } else {
+    riskLevel = 'normal';
+    judgement = `距过期还有 ${daysDiff} 天，在正常范围内`;
+  }
+
+  return {
+    batchId: batch.id,
+    batchNumber: batch.batchNumber,
+    batchExpiryDate: batch.expiryDate,
+    caseId: caseItem.id,
+    caseSurgeryDate: caseItem.surgeryDate,
+    daysDiff,
+    expiredAtSurgery,
+    nearExpiryThreshold: NEAR_EXPIRY_THRESHOLD,
+    riskLevel,
+    judgement,
+  };
+}
+
+function generateExpiryAnomalies(): Anomaly[] {
+  const result: Anomaly[] = [];
+  let expiryIndex = 8;
+
+  patientCases.forEach((caseItem) => {
+    const batch = implantBatches.find((b) => b.id === caseItem.implantBatchId);
+    if (!batch) return;
+
+    const detail = buildExpiryAnomalyDetail(caseItem, batch);
+
+    if (detail.riskLevel === 'normal') return;
+
+    const doctor = doctors.find((d) => d.id === caseItem.doctorId);
+    const severity = detail.riskLevel === 'expired' ? 'high' : 'medium';
+
+    const description =
+      detail.riskLevel === 'expired'
+        ? `严重：该病例手术时种植体已过期 ${Math.abs(detail.daysDiff)} 天（有效期 ${batch.expiryDate}，手术日期 ${caseItem.surgeryDate}）`
+        : `预警：该病例使用的种植体距过期仅 ${detail.daysDiff} 天（有效期 ${batch.expiryDate}，手术日期 ${caseItem.surgeryDate}）`;
+
+    result.push({
+      id: `a${String(expiryIndex).padStart(3, '0')}`,
+      type: 'expiry',
+      severity,
+      storeId: caseItem.storeId,
+      batchNumber: batch.batchNumber,
+      batchExpiryDate: batch.expiryDate,
+      description,
+      caseId: caseItem.id,
+      patientName: caseItem.patientName,
+      doctorName: doctor?.name,
+      surgeryDate: caseItem.surgeryDate,
+      expiryDetail: detail,
+      discoveredAt: caseItem.surgeryDate,
+      status: 'open',
+      messages: [],
+      corrections: [],
+    });
+
+    expiryIndex++;
+  });
+
+  return result;
+}
 
 const correctionsFromHistory: Record<string, Correction[]> = {
   a003: [
@@ -7,16 +101,12 @@ const correctionsFromHistory: Record<string, Correction[]> = {
   a007: [
     { id: 'cr002', anomalyId: 'a007', note: '经核查为护士录入时选错批号，实际使用批号为DT-2025-0620-R，已更正系统记录。', attachmentName: '更正记录_DT-2025-0110-U.png', submittedBy: '武汉江汉店-林薇', submittedAt: '2025-08-09 10:15', status: 'pending_review' },
   ],
-  a009: [
-    { id: 'cr003', anomalyId: 'a009', note: '已更换为有效期内的同规格种植体，原批次已退回供应商。', attachmentName: '退回凭证_DS-2024-1015-02.pdf', submittedBy: '深圳南山店-吴婷', submittedAt: '2025-08-22 11:00', status: 'rejected', reviewNote: '请补充更换后的种植体出库单和病例截图。', reviewedBy: '质控总部', reviewedAt: '2025-08-23 09:15' },
-    { id: 'cr003b', anomalyId: 'a009', note: '已补充更换后的出库单和病例截图，请查阅附件。', attachmentName: '更换凭证及病例_DS-2024-1015-02.zip', submittedBy: '深圳南山店-吴婷', submittedAt: '2025-08-24 14:20', status: 'approved', reviewedBy: '质控总部', reviewedAt: '2025-08-25 10:00' },
-  ],
   a014: [
     { id: 'cr004', anomalyId: 'a014', note: '系统规格字段已修正为4.0x11.5mm，与实际使用一致。', attachmentName: '规格更正截图.png', submittedBy: '南京鼓楼店-何霞', submittedAt: '2025-08-21 09:45', status: 'approved', reviewedBy: '质控总部', reviewedAt: '2025-08-22 10:30' },
   ],
 };
 
-export const anomalies: Anomaly[] = [
+const baseAnomalies: Anomaly[] = [
   {
     id: 'a001',
     type: 'unbound',
@@ -55,6 +145,9 @@ export const anomalies: Anomaly[] = [
       { id: 'm002', anomalyId: 'a003', sender: '深圳南山店', senderRole: 'store', content: '收到，正在核对相关病例，预计今天内完成补录。', createdAt: '2025-08-15 14:20' },
     ],
     corrections: correctionsFromHistory.a003,
+    resolvedAt: '2025-08-17 11:00',
+    resolvedBy: '质控总部',
+    resolvedNote: '补正资料审核通过，已完成病例绑定，异常关闭。',
   },
   {
     id: 'a004',
@@ -126,117 +219,6 @@ export const anomalies: Anomaly[] = [
     corrections: correctionsFromHistory.a007,
   },
   {
-    id: 'a008',
-    type: 'expiry',
-    severity: 'high',
-    storeId: 's002',
-    batchNumber: 'OS-2025-0228-M',
-    batchExpiryDate: '2027-02-28',
-    caseId: 'c008',
-    patientName: '孙雅婷',
-    doctorName: '陈伟强',
-    surgeryDate: '2025-07-25',
-    expiryDetail: {
-      batchId: 'bat009',
-      batchNumber: 'OS-2025-0228-M',
-      batchExpiryDate: '2027-02-28',
-      caseId: 'c008',
-      caseSurgeryDate: '2025-07-25',
-      daysDiff: 583,
-      expiredAtSurgery: false,
-      nearExpiryThreshold: 90,
-    },
-    description: '系统自动检测：该病例绑定批号的有效期与手术日期需要人工复核（有效期2027-02-28 vs 手术2025-07-25，余583天）',
-    discoveredAt: '2025-08-01',
-    status: 'open',
-    messages: [],
-    corrections: [],
-  },
-  {
-    id: 'a009',
-    type: 'expiry',
-    severity: 'high',
-    storeId: 's004',
-    batchNumber: 'ZB-2025-0505-Q',
-    batchExpiryDate: '2027-05-05',
-    caseId: 'c018',
-    patientName: '韩志强',
-    doctorName: '陈雅婷',
-    surgeryDate: '2025-07-10',
-    expiryDetail: {
-      batchId: 'bat019',
-      batchNumber: 'ZB-2025-0505-Q',
-      batchExpiryDate: '2027-05-05',
-      caseId: 'c018',
-      caseSurgeryDate: '2025-07-10',
-      daysDiff: 664,
-      expiredAtSurgery: false,
-      nearExpiryThreshold: 90,
-    },
-    description: '系统自动检测：该病例绑定批号的有效期与手术日期需要人工复核（有效期2027-05-05 vs 手术2025-07-10，余664天）',
-    discoveredAt: '2025-08-05',
-    status: 'resolved',
-    messages: [
-      { id: 'm006', anomalyId: 'a009', sender: '质控总部', senderRole: 'headquarters', content: '请尽快安排使用或申请调货。', createdAt: '2025-08-06 10:00' },
-      { id: 'm007', anomalyId: 'a009', sender: '深圳南山店', senderRole: 'store', content: '已协调其他门店调货，目前已全部使用完毕。', createdAt: '2025-08-20 15:30' },
-    ],
-    corrections: correctionsFromHistory.a009,
-  },
-  {
-    id: 'a010',
-    type: 'expiry',
-    severity: 'low',
-    storeId: 's005',
-    batchNumber: 'BC-2025-0115-H',
-    batchExpiryDate: '2026-12-15',
-    caseId: 'c023',
-    patientName: '许文博',
-    doctorName: '周逸飞',
-    surgeryDate: '2025-07-20',
-    expiryDetail: {
-      batchId: 'bat025',
-      batchNumber: 'BC-2025-0115-H',
-      batchExpiryDate: '2026-12-15',
-      caseId: 'c023',
-      caseSurgeryDate: '2025-07-20',
-      daysDiff: 513,
-      expiredAtSurgery: false,
-      nearExpiryThreshold: 90,
-    },
-    description: '系统自动检测：该病例绑定批号的有效期与手术日期需要人工复核（有效期2026-12-15 vs 手术2025-07-20，余513天）',
-    discoveredAt: '2025-08-10',
-    status: 'open',
-    messages: [],
-    corrections: [],
-  },
-  {
-    id: 'a011',
-    type: 'expiry',
-    severity: 'high',
-    storeId: 's006',
-    batchNumber: 'DS-2025-0518-03',
-    batchExpiryDate: '2027-05-18',
-    caseId: 'c029',
-    patientName: '曹美玲',
-    doctorName: '孙婉清',
-    surgeryDate: '2025-08-12',
-    expiryDetail: {
-      batchId: 'bat028',
-      batchNumber: 'DS-2025-0518-03',
-      batchExpiryDate: '2027-05-18',
-      caseId: 'c029',
-      caseSurgeryDate: '2025-08-12',
-      daysDiff: 645,
-      expiredAtSurgery: false,
-      nearExpiryThreshold: 90,
-    },
-    description: '系统自动检测：该病例绑定批号的有效期与手术日期需要人工复核（有效期2027-05-18 vs 手术2025-08-12，余645天）',
-    discoveredAt: '2025-08-15',
-    status: 'open',
-    messages: [],
-    corrections: [],
-  },
-  {
     id: 'a012',
     type: 'unbound',
     severity: 'low',
@@ -282,6 +264,9 @@ export const anomalies: Anomaly[] = [
       { id: 'm009', anomalyId: 'a014', sender: '南京鼓楼店', senderRole: 'store', content: '已确认，是系统中规格字段录入有误，已修正。', createdAt: '2025-08-20 14:00' },
     ],
     corrections: correctionsFromHistory.a014,
+    resolvedAt: '2025-08-22 11:30',
+    resolvedBy: '质控总部',
+    resolvedNote: '补正资料审核通过，系统记录已更正，异常关闭。',
   },
   {
     id: 'a015',
@@ -296,3 +281,28 @@ export const anomalies: Anomaly[] = [
     corrections: [],
   },
 ];
+
+const expiryAnomalies = generateExpiryAnomalies();
+
+const a009Corrections: Correction[] = [
+  { id: 'cr003', anomalyId: 'a009', note: '已更换为有效期内的同规格种植体，原批次已退回供应商。', attachmentName: '退回凭证_DS-2024-1015-02.pdf', submittedBy: '深圳南山店-吴婷', submittedAt: '2025-08-22 11:00', status: 'rejected', reviewNote: '请补充更换后的种植体出库单和病例截图。', reviewedBy: '质控总部', reviewedAt: '2025-08-23 09:15' },
+  { id: 'cr003b', anomalyId: 'a009', note: '已补充更换后的出库单和病例截图，请查阅附件。', attachmentName: '更换凭证及病例_DS-2024-1015-02.zip', submittedBy: '深圳南山店-吴婷', submittedAt: '2025-08-24 14:20', status: 'approved', reviewedBy: '质控总部', reviewedAt: '2025-08-25 10:00' },
+];
+
+if (expiryAnomalies.length > 0) {
+  const firstExpiry = expiryAnomalies.find((a) => a.expiryDetail?.riskLevel === 'expired');
+  if (firstExpiry) {
+    firstExpiry.id = 'a009';
+    firstExpiry.status = 'resolved';
+    firstExpiry.messages = [
+      { id: 'm006', anomalyId: 'a009', sender: '质控总部', senderRole: 'headquarters', content: '该问题非常严重，请立即核查并采取补救措施。', createdAt: '2025-08-06 10:00' },
+      { id: 'm007', anomalyId: 'a009', sender: '深圳南山店', senderRole: 'store', content: '已为患者安排免费复查和更换种植体，患者无不适反应。', createdAt: '2025-08-20 15:30' },
+    ];
+    firstExpiry.corrections = a009Corrections;
+    firstExpiry.resolvedAt = '2025-08-25 11:00';
+    firstExpiry.resolvedBy = '质控总部';
+    firstExpiry.resolvedNote = '患者已完成补救治疗，资料齐全，异常关闭。';
+  }
+}
+
+export const anomalies: Anomaly[] = [...baseAnomalies, ...expiryAnomalies];

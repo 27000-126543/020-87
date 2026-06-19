@@ -7,6 +7,8 @@ interface TrackingState {
   trackingResult: BatchTrackingGroup[];
   searchHistory: string[];
   isSearching: boolean;
+  recallTaskFilters: { storeId: string | null; batchNumber: string | null; recallStatus: string | null };
+  showRecallView: boolean;
   setSearchKeyword: (keyword: string) => void;
   searchBatch: (batchNumber: string) => void;
   searchBatches: (input: string) => void;
@@ -15,6 +17,14 @@ interface TrackingState {
   batchRecall: () => void;
   updateRecallResult: (caseId: string, result: { status: 'pending' | 'completed' | 'unreachable'; note?: string }) => void;
   markUnreachable: (caseId: string) => void;
+  setRecallTaskFilterStore: (storeId: string | null) => void;
+  setRecallTaskFilterBatch: (batchNumber: string | null) => void;
+  setRecallTaskFilterStatus: (status: string | null) => void;
+  updateRecallOwner: (caseId: string, owner: string) => void;
+  updatePlannedReviewDate: (caseId: string, date: string) => void;
+  updateContactNotes: (caseId: string, notes: string) => void;
+  batchRecallAndEnterView: () => void;
+  setShowRecallView: (show: boolean) => void;
 }
 
 function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null {
@@ -67,6 +77,12 @@ function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null
           followUpDate: caseItem.followUpDate,
           recallStatus: caseItem.recallStatus || 'none',
           recallResult: caseItem.recallResult,
+          storeId: store.id,
+          storeName: store.name,
+          batchNumber: firstBatch.batchNumber,
+          recallOwner: undefined,
+          plannedReviewDate: undefined,
+          contactNotes: undefined,
         });
       });
 
@@ -104,6 +120,8 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
   trackingResult: [],
   searchHistory: ['NB-2025-0315', 'STM-2025-0620', 'OS-2025-0228'],
   isSearching: false,
+  recallTaskFilters: { storeId: null, batchNumber: null, recallStatus: null },
+  showRecallView: false,
 
   setSearchKeyword: (keyword) => {
     set({ searchKeyword: keyword });
@@ -286,5 +304,68 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
 
   markUnreachable: (caseId) => {
     get().updateRecallResult(caseId, { status: 'unreachable' });
+  },
+
+  setRecallTaskFilterStore: (storeId) => {
+    set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, storeId } }));
+  },
+
+  setRecallTaskFilterBatch: (batchNumber) => {
+    set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, batchNumber } }));
+  },
+
+  setRecallTaskFilterStatus: (status) => {
+    set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, recallStatus: status } }));
+  },
+
+  updateRecallOwner: (caseId, owner) => {
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            c.caseId === caseId ? { ...c, recallOwner: owner } : c
+          ),
+        })),
+      })),
+    }));
+  },
+
+  updatePlannedReviewDate: (caseId, date) => {
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            c.caseId === caseId ? { ...c, plannedReviewDate: date } : c
+          ),
+        })),
+      })),
+    }));
+  },
+
+  updateContactNotes: (caseId, notes) => {
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            c.caseId === caseId ? { ...c, contactNotes: notes } : c
+          ),
+        })),
+      })),
+    }));
+  },
+
+  batchRecallAndEnterView: () => {
+    get().batchRecall();
+    set({ showRecallView: true });
+  },
+
+  setShowRecallView: (show) => {
+    set({ showRecallView: show });
   },
 }));

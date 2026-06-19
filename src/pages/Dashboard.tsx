@@ -14,14 +14,17 @@ import {
   BarChart3,
   Building2,
   Tag,
+  Filter,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts';
 import { StatCard } from '@/components/StatCard';
 import { FilterBar } from '@/components/FilterBar';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useDashboardStore } from '@/store/useDashboardStore';
+import { useAnomalyStore } from '@/store/useAnomalyStore';
+import { useTrackingStore } from '@/store/useTrackingStore';
 import { useNavigate } from 'react-router-dom';
-import type { AnomalyType, Anomaly } from '@/types';
+import type { AnomalyType, Anomaly, RiskTrendPoint } from '@/types';
 import { stores, brands } from '@/data';
 import { cn } from '@/lib/utils';
 
@@ -416,15 +419,50 @@ export function Dashboard() {
     setSelectedTrendStore,
     setSelectedTrendBrand,
     getTrendSeries,
+    navigateWithTrendFilter,
+    clearTrendJump,
+    getTrendJumpParams,
   } = useDashboardStore();
+  const {
+    setTrendFilter,
+    setSelectedType,
+  } = useAnomalyStore();
+  const {
+    setRecallTaskFilterStore,
+    setRecallTaskFilterBatch,
+    setShowRecallView,
+  } = useTrackingStore();
 
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     computeDashboardData();
     const timer = setTimeout(() => setIsLoaded(true), 100);
-    return () => clearTimeout(timer);
-  }, [computeDashboardData]);
+    return () => {
+      clearTimeout(timer);
+      clearTrendJump();
+    };
+  }, [computeDashboardData, clearTrendJump]);
+
+  const handleTrendClick = (target: 'anomalies' | 'tracking' | 'unbound', point: RiskTrendPoint) => {
+    if (!point) return;
+    navigateWithTrendFilter(target, point);
+    const params = getTrendJumpParams();
+    if (target === 'anomalies') {
+      setTrendFilter(params);
+      navigate('/anomalies');
+    } else if (target === 'tracking') {
+      if (params.storeId) {
+        setRecallTaskFilterStore(params.storeId);
+      }
+      setShowRecallView(true);
+      navigate('/tracking');
+    } else if (target === 'unbound') {
+      setSelectedType('unbound');
+      setTrendFilter(params);
+      navigate('/anomalies');
+    }
+  };
 
   if (drillDownStoreId) {
     return (
@@ -492,6 +530,7 @@ export function Dashboard() {
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-xl">
           <p className="text-sm font-medium text-slate-200">{label}</p>
           <p className="text-amber-400 font-semibold mt-1">{payload[0].value} 批</p>
+          <p className="text-xs text-slate-500 mt-1">点击查看未绑定明细</p>
         </div>
       );
     }
@@ -815,7 +854,7 @@ export function Dashboard() {
                     strokeWidth={2}
                     dot={{ r: 4, fill: '#ef4444', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
                     activeDot={{ r: 6, fill: '#ef4444', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
-                    onClick={() => navigate('/anomalies')}
+                    onClick={(data: any) => handleTrendClick('anomalies', data.activePayload?.[0]?.payload)}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -841,7 +880,7 @@ export function Dashboard() {
                     strokeWidth={2}
                     dot={{ r: 4, fill: '#0d9488', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
                     activeDot={{ r: 6, fill: '#0d9488', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
-                    onClick={() => navigate('/tracking')}
+                    onClick={(data: any) => handleTrendClick('tracking', data.activePayload?.[0]?.payload)}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -867,6 +906,7 @@ export function Dashboard() {
                     strokeWidth={2}
                     dot={{ r: 4, fill: '#f59e0b', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
                     activeDot={{ r: 6, fill: '#f59e0b', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
+                    onClick={(data: any) => handleTrendClick('unbound', data.activePayload?.[0]?.payload)}
                   />
                 </LineChart>
               </ResponsiveContainer>

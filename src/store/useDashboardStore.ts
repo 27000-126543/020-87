@@ -23,6 +23,8 @@ interface DashboardState {
   selectedTrendStoreId: string | null;
   selectedTrendBrandId: string | null;
   trendData: RiskTrendData;
+  trendJumpMonth: string | null;
+  trendJumpTarget: 'anomalies' | 'tracking' | 'unbound' | null;
   setBrandFilter: (brandId: string | null) => void;
   setStoreFilter: (storeId: string | null) => void;
   setDoctorFilter: (doctorId: string | null) => void;
@@ -33,6 +35,9 @@ interface DashboardState {
   setSelectedTrendStore: (storeId: string | null) => void;
   setSelectedTrendBrand: (brandId: string | null) => void;
   getTrendSeries: () => RiskTrendPoint[];
+  navigateWithTrendFilter: (target: 'anomalies' | 'tracking' | 'unbound', point: RiskTrendPoint) => void;
+  clearTrendJump: () => void;
+  getTrendJumpParams: () => { storeId: string | null; brandId: string | null; month: string | null };
 }
 
 function computeStats(
@@ -227,6 +232,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   selectedTrendStoreId: null,
   selectedTrendBrandId: null,
   trendData: buildMockTrendData(),
+  trendJumpMonth: null,
+  trendJumpTarget: null,
 
   setBrandFilter: (brandId) => {
     set((state) => ({ filters: { ...state.filters, brandId } }));
@@ -352,5 +359,32 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       return trendData.byBrand[selectedTrendBrandId] ?? [];
     }
     return trendData.overall;
+  },
+  navigateWithTrendFilter: (target, point) => {
+    const { trendView, selectedTrendStoreId, selectedTrendBrandId } = get();
+    set({
+      trendJumpMonth: point.month,
+      trendJumpTarget: target,
+    });
+    if (trendView === 'store' && selectedTrendStoreId) {
+      set({ selectedTrendStoreId });
+    }
+    if (trendView === 'brand' && selectedTrendBrandId) {
+      set({ selectedTrendBrandId });
+    }
+  },
+  clearTrendJump: () => {
+    set({
+      trendJumpMonth: null,
+      trendJumpTarget: null,
+    });
+  },
+  getTrendJumpParams: () => {
+    const { trendView, selectedTrendStoreId, selectedTrendBrandId, trendJumpMonth } = get();
+    return {
+      storeId: trendView === 'store' ? selectedTrendStoreId : null,
+      brandId: trendView === 'brand' ? selectedTrendBrandId : null,
+      month: trendJumpMonth,
+    };
   },
 }));

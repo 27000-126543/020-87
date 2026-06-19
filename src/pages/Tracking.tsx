@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Search,
   History,
@@ -9,7 +9,6 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Clock,
   X,
   ChevronDown,
   ChevronUp,
@@ -21,10 +20,14 @@ import {
   Bell,
   XCircle,
   UserCheck,
-  PhoneOff
+  PhoneOff,
+  UserCircle,
+  CalendarDays,
+  StickyNote,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useTrackingStore } from '@/store/useTrackingStore';
+import { stores } from '@/data';
 import { cn } from '@/lib/utils';
 import type { TrackingCase } from '@/types';
 
@@ -34,20 +37,87 @@ export function Tracking() {
     trackingResult,
     searchHistory,
     isSearching,
+    recallTaskFilters,
+    showRecallView,
     setSearchKeyword,
     searchBatches,
     clearSearch,
     updateRecallStatus,
-    batchRecall,
     updateRecallResult,
-    markUnreachable,
+    setRecallTaskFilterStore,
+    setRecallTaskFilterBatch,
+    setRecallTaskFilterStatus,
+    updateRecallOwner,
+    updatePlannedReviewDate,
+    updateContactNotes,
+    batchRecallAndEnterView,
+    setShowRecallView,
   } = useTrackingStore();
 
   const [expandedStores, setExpandedStores] = useState<Set<string>>(new Set());
-  const [showRecallView, setShowRecallView] = useState<boolean>(false);
   const [selectedCaseForReview, setSelectedCaseForReview] = useState<TrackingCase | null>(null);
   const [reviewStatus, setReviewStatus] = useState<'pending' | 'completed' | 'unreachable'>('pending');
   const [reviewNote, setReviewNote] = useState<string>('');
+  const [editingCell, setEditingCell] = useState<{ caseId: string; field: string } | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+
+  const uniqueBatchNumbers = useMemo(() => {
+    const batches = new Set<string>();
+    trackingResult.forEach((group) => {
+      group.storeDistributions.forEach((sd) => {
+        sd.cases.forEach((c) => batches.add(c.batchNumber));
+      });
+    });
+    return Array.from(batches);
+  }, [trackingResult]);
+
+  const allCasesFlat = useMemo(() => {
+    const cases: (TrackingCase & { storeName: string; batchNumber: string })[] = [];
+    trackingResult.forEach((group) => {
+      group.storeDistributions.forEach((sd) => {
+        sd.cases.forEach((c) => {
+          cases.push({
+            ...c,
+            storeName: sd.storeName,
+            batchNumber: group.batchNumber,
+          });
+        });
+      });
+    });
+    return cases;
+  }, [trackingResult]);
+
+  const filteredCases = useMemo(() => {
+    let result = [...allCasesFlat];
+
+    if (recallTaskFilters.storeId) {
+      result = result.filter((c) => c.storeId === recallTaskFilters.storeId);
+    }
+
+    if (recallTaskFilters.batchNumber) {
+      result = result.filter((c) => c.batchNumber === recallTaskFilters.batchNumber);
+    }
+
+    if (recallTaskFilters.recallStatus && recallTaskFilters.recallStatus !== '全部') {
+      let statusValue: string;
+      switch (recallTaskFilters.recallStatus) {
+        case '待复查':
+          statusValue = 'pending';
+          break;
+        case '已复查':
+          statusValue = 'completed';
+          break;
+        case '无法联系':
+          statusValue = 'unreachable';
+          break;
+        default:
+          statusValue = recallTaskFilters.recallStatus;
+      }
+      result = result.filter((c) => c.recallStatus === statusValue);
+    }
+
+    return result;
+  }, [allCasesFlat, recallTaskFilters]);
 
   const handleSearch = () => {
     if (searchKeyword.trim()) {
@@ -102,7 +172,7 @@ export function Tracking() {
 
   const handleRecall = (caseItem: TrackingCase) => {
     const newStatus = caseItem.recallStatus === 'none' ? 'pending' : caseItem.recallStatus === 'pending' ? 'completed' : 'none';
-    updateRecallStatus(caseItem.caseId, newStatus as any);
+    updateRecallStatus(caseItem.caseId, newStatus as 'none' | 'pending' | 'completed' | 'unreachable');
   };
 
   const openReviewModal = (caseItem: TrackingCase, initialStatus: 'pending' | 'completed' | 'unreachable') => {
@@ -147,6 +217,39 @@ export function Tracking() {
       });
     } catch {
       return '-';
+    }
+  };
+
+  const startEditing = (caseId: string, field: string, currentValue: string | undefined) => {
+    setEditingCell({ caseId, field });
+    setEditValue(currentValue || '');
+  };
+
+  const saveEditing = () => {
+    if (!editingCell) return;
+
+    const { caseId, field } = editingCell;
+
+    switch (field) {
+      case 'recallOwner':
+        updateRecallOwner(caseId, editValue);
+        break;
+      case 'plannedReviewDate':
+        updatePlannedReviewDate(caseId, editValue);
+        break;
+      case 'contactNotes':
+        updateContactNotes(caseId, editValue);
+        break;
+    }
+
+    setEditingCell(null);
+    setEditValue('');
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && editingCell?.field !== 'contactNotes') {
+      e.preventDefault();
+      saveEditing();
     }
   };
 
@@ -251,7 +354,7 @@ export function Tracking() {
                   清除
                 </button>
                 <button
-                  onClick={batchRecall}
+                  onClick={batchRecallAndEnterView}
                   disabled={summaryPendingRecall === 0}
                   className={cn(
                     'flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium transition-colors',
@@ -285,170 +388,304 @@ export function Tracking() {
 
           {showRecallView ? (
             <div className="space-y-6">
-              {trackingResult.map((group) => {
-                const allCases = group.storeDistributions.flatMap((sd) =>
-                  sd.cases.map((c) => ({ ...c, storeName: sd.storeName }))
-                );
-
-                return (
+              <div className="space-y-4">
+                {trackingResult.map((group) => (
                   <div
                     key={group.batchNumber}
-                    className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl overflow-hidden"
+                    className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl p-5"
                   >
-                    <div className="p-5 border-b border-slate-700/50">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center">
-                            <Layers className="w-5 h-5 text-teal-400" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-3">
-                              <h3 className="text-lg font-bold text-white font-mono">
-                                {group.batchNumber}
-                              </h3>
-                              <StatusBadge variant="info">
-                                {group.brandName}
-                              </StatusBadge>
-                            </div>
-                            <p className="text-slate-400 text-sm mt-0.5">
-                              {group.productName} · {group.spec}
-                            </p>
-                          </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center">
+                          <Layers className="w-5 h-5 text-teal-400" />
                         </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                            <p className="text-2xl font-bold text-amber-400">{group.pendingRecall}</p>
-                            <p className="text-xs text-amber-400/80 mt-0.5">待复查</p>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <h3 className="text-lg font-bold text-white font-mono">
+                              {group.batchNumber}
+                            </h3>
+                            <StatusBadge variant="info">
+                              {group.brandName}
+                            </StatusBadge>
                           </div>
-                          <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-                            <p className="text-2xl font-bold text-emerald-400">{group.completedRecall}</p>
-                            <p className="text-xs text-emerald-400/80 mt-0.5">已复查</p>
-                          </div>
-                          <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-red-500/10 border border-red-500/30">
-                            <p className="text-2xl font-bold text-red-400">{group.unreachableRecall}</p>
-                            <p className="text-xs text-red-400/80 mt-0.5">无法联系</p>
-                          </div>
+                          <p className="text-slate-400 text-sm mt-0.5">
+                            {group.productName} · {group.spec}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                          <p className="text-2xl font-bold text-amber-400">{group.pendingRecall}</p>
+                          <p className="text-xs text-amber-400/80 mt-0.5">待复查</p>
+                        </div>
+                        <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+                          <p className="text-2xl font-bold text-emerald-400">{group.completedRecall}</p>
+                          <p className="text-xs text-emerald-400/80 mt-0.5">已复查</p>
+                        </div>
+                        <div className="flex flex-col items-center px-5 py-3 rounded-lg bg-red-500/10 border border-red-500/30">
+                          <p className="text-2xl font-bold text-red-400">{group.unreachableRecall}</p>
+                          <p className="text-xs text-red-400/80 mt-0.5">无法联系</p>
                         </div>
                       </div>
                     </div>
-
-                    <div className="bg-slate-900/50 overflow-hidden border border-slate-700/30">
-                      <table className="w-full">
-                        <thead className="bg-slate-800/50">
-                          <tr>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              患者姓名
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              所属门店
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              牙位
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              手术日期
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              主刀医生
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              召回状态
-                            </th>
-                            <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              最近联系时间
-                            </th>
-                            <th className="text-right text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
-                              操作
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700/50">
-                          {allCases.map((caseItem) => (
-                            <tr
-                              key={caseItem.caseId}
-                              className="hover:bg-slate-800/30 transition-colors"
-                            >
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                                    <User className="w-4 h-4 text-slate-400" />
-                                  </div>
-                                  <span className="text-sm text-slate-200 font-medium">
-                                    {caseItem.patientName}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-1.5">
-                                  <Store className="w-3.5 h-3.5 text-slate-500" />
-                                  <span className="text-sm text-slate-300">
-                                    {caseItem.storeName}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 text-sm font-mono">
-                                  {caseItem.toothPosition}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className="text-sm text-slate-400">
-                                  {caseItem.surgeryDate}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-1.5">
-                                  <Stethoscope className="w-3.5 h-3.5 text-slate-500" />
-                                  <span className="text-sm text-slate-300">
-                                    {caseItem.doctorName}
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                {getRecallStatusBadge(caseItem.recallStatus)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className="text-sm text-slate-400">
-                                  {formatContactedAt(caseItem.recallResult?.contactedAt)}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                {(caseItem.recallStatus === 'pending' || caseItem.recallStatus === 'none') && (
-                                  <div className="flex items-center gap-2 justify-end">
-                                    <button
-                                      onClick={() => openReviewModal(caseItem, 'completed')}
-                                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5"
-                                    >
-                                      <UserCheck className="w-3.5 h-3.5" />
-                                      标记已复查
-                                    </button>
-                                    <button
-                                      onClick={() => openReviewModal(caseItem, 'unreachable')}
-                                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 flex items-center gap-1.5"
-                                    >
-                                      <PhoneOff className="w-3.5 h-3.5" />
-                                      无法联系
-                                    </button>
-                                  </div>
-                                )}
-                                {(caseItem.recallStatus === 'completed' || caseItem.recallStatus === 'unreachable') && (
-                                  <button
-                                    onClick={() => handleReset(caseItem)}
-                                    className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center gap-1.5 ml-auto"
-                                  >
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                    重置
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+
+              <div className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl p-5">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-400 whitespace-nowrap">门店筛选:</label>
+                    <select
+                      value={recallTaskFilters.storeId || ''}
+                      onChange={(e) => setRecallTaskFilterStore(e.target.value || null)}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all min-w-[200px]"
+                    >
+                      <option value="">全部门店</option>
+                      {stores.map((store) => (
+                        <option key={store.id} value={store.id}>
+                          {store.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-400 whitespace-nowrap">批号筛选:</label>
+                    <select
+                      value={recallTaskFilters.batchNumber || ''}
+                      onChange={(e) => setRecallTaskFilterBatch(e.target.value || null)}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all min-w-[200px]"
+                    >
+                      <option value="">全部批号</option>
+                      {uniqueBatchNumbers.map((bn) => (
+                        <option key={bn} value={bn}>
+                          {bn}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-400 whitespace-nowrap">复查状态:</label>
+                    <select
+                      value={recallTaskFilters.recallStatus || '全部'}
+                      onChange={(e) => setRecallTaskFilterStatus(e.target.value || null)}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all min-w-[150px]"
+                    >
+                      <option value="全部">全部</option>
+                      <option value="待复查">待复查</option>
+                      <option value="已复查">已复查</option>
+                      <option value="无法联系">无法联系</option>
+                    </select>
+                  </div>
+
+                  <div className="ml-auto text-sm text-slate-400">
+                    共 <span className="text-teal-400 font-semibold">{filteredCases.length}</span> 条记录
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl overflow-hidden">
+                <div className="bg-slate-900/50 overflow-hidden border border-slate-700/30">
+                  <table className="w-full">
+                    <thead className="bg-slate-800/50">
+                      <tr>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          患者姓名
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          所属门店
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          风险批号
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          牙位
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          手术日期
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          主刀医生
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          负责人
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          计划复查日期
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          召回状态
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          最近联系时间
+                        </th>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          联系备注
+                        </th>
+                        <th className="text-right text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
+                          操作
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/50">
+                      {filteredCases.map((caseItem) => (
+                        <tr
+                          key={caseItem.caseId}
+                          className="hover:bg-slate-800/30 transition-colors"
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                                <User className="w-4 h-4 text-slate-400" />
+                              </div>
+                              <span className="text-sm text-slate-200 font-medium">
+                                {caseItem.patientName}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <Store className="w-3.5 h-3.5 text-slate-500" />
+                              <span className="text-sm text-slate-300">
+                                {caseItem.storeName}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-slate-300 font-mono">
+                              {caseItem.batchNumber}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 text-sm font-mono">
+                              {caseItem.toothPosition}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-slate-400">
+                              {caseItem.surgeryDate}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <Stethoscope className="w-3.5 h-3.5 text-slate-500" />
+                              <span className="text-sm text-slate-300">
+                                {caseItem.doctorName}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'recallOwner' ? (
+                              <input
+                                type="text"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={saveEditing}
+                                onKeyDown={handleEditKeyDown}
+                                autoFocus
+                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                            ) : (
+                              <div
+                                onClick={() => startEditing(caseItem.caseId, 'recallOwner', caseItem.recallOwner)}
+                                className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                              >
+                                <UserCircle className="w-3.5 h-3.5 text-slate-500" />
+                                <span className="text-sm text-slate-300">
+                                  {caseItem.recallOwner || <span className="text-slate-500">点击分配</span>}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'plannedReviewDate' ? (
+                              <input
+                                type="date"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={saveEditing}
+                                autoFocus
+                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                            ) : (
+                              <div
+                                onClick={() => startEditing(caseItem.caseId, 'plannedReviewDate', caseItem.plannedReviewDate)}
+                                className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                              >
+                                <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
+                                <span className="text-sm text-slate-300">
+                                  {caseItem.plannedReviewDate || <span className="text-slate-500">点击设置</span>}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {getRecallStatusBadge(caseItem.recallStatus)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-slate-400">
+                              {formatContactedAt(caseItem.recallResult?.contactedAt)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 max-w-[200px]">
+                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'contactNotes' ? (
+                              <textarea
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={saveEditing}
+                                autoFocus
+                                rows={2}
+                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 resize-none"
+                              />
+                            ) : (
+                              <div
+                                onClick={() => startEditing(caseItem.caseId, 'contactNotes', caseItem.contactNotes)}
+                                className="flex items-start gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                              >
+                                <StickyNote className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+                                <span className="text-sm text-slate-300">
+                                  {caseItem.contactNotes || <span className="text-slate-500">点击添加</span>}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {(caseItem.recallStatus === 'pending' || caseItem.recallStatus === 'none') && (
+                              <div className="flex items-center gap-2 justify-end">
+                                <button
+                                  onClick={() => openReviewModal(caseItem, 'completed')}
+                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5"
+                                >
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  标记已复查
+                                </button>
+                                <button
+                                  onClick={() => openReviewModal(caseItem, 'unreachable')}
+                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 flex items-center gap-1.5"
+                                >
+                                  <PhoneOff className="w-3.5 h-3.5" />
+                                  无法联系
+                                </button>
+                              </div>
+                            )}
+                            {(caseItem.recallStatus === 'completed' || caseItem.recallStatus === 'unreachable') && (
+                              <button
+                                onClick={() => handleReset(caseItem)}
+                                className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center gap-1.5 ml-auto"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                重置
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="space-y-6">
