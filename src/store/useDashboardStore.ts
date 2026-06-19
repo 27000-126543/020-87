@@ -12,6 +12,16 @@ import type {
 } from '@/types';
 import { daysFromNow, daysBetween } from '@/utils/date';
 
+interface TrendJumpParams {
+  month: string | null;
+  monthLabel: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  brandId: string | null;
+  brandName: string | null;
+  viewType: 'overall' | 'store' | 'brand';
+}
+
 interface DashboardState {
   filters: FilterState;
   stats: DashboardStats;
@@ -37,7 +47,13 @@ interface DashboardState {
   getTrendSeries: () => RiskTrendPoint[];
   navigateWithTrendFilter: (target: 'anomalies' | 'tracking' | 'unbound', point: RiskTrendPoint) => void;
   clearTrendJump: () => void;
-  getTrendJumpParams: () => { storeId: string | null; brandId: string | null; month: string | null };
+  getTrendJumpParams: () => TrendJumpParams;
+  getTrendFilterDisplayLabel: () => string;
+}
+
+function formatMonthLabel(month: string): string {
+  const [year, mon] = month.split('-');
+  return `${year}年${parseInt(mon, 10)}月`;
 }
 
 function computeStats(
@@ -381,10 +397,29 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
   getTrendJumpParams: () => {
     const { trendView, selectedTrendStoreId, selectedTrendBrandId, trendJumpMonth } = get();
+    const store = selectedTrendStoreId ? stores.find((s) => s.id === selectedTrendStoreId) : null;
+    const brand = selectedTrendBrandId ? brands.find((b) => b.id === selectedTrendBrandId) : null;
     return {
-      storeId: trendView === 'store' ? selectedTrendStoreId : null,
-      brandId: trendView === 'brand' ? selectedTrendBrandId : null,
       month: trendJumpMonth,
+      monthLabel: trendJumpMonth ? formatMonthLabel(trendJumpMonth) : null,
+      storeId: trendView === 'store' ? selectedTrendStoreId : null,
+      storeName: trendView === 'store' && store ? store.name : null,
+      brandId: trendView === 'brand' ? selectedTrendBrandId : null,
+      brandName: trendView === 'brand' && brand ? brand.name : null,
+      viewType: trendView,
     };
+  },
+  getTrendFilterDisplayLabel: () => {
+    const { trendView, selectedTrendStoreId, selectedTrendBrandId, trendJumpMonth } = get();
+    const monthLabel = trendJumpMonth ? formatMonthLabel(trendJumpMonth) : '';
+    if (trendView === 'store' && selectedTrendStoreId) {
+      const store = stores.find((s) => s.id === selectedTrendStoreId);
+      return `${monthLabel} · ${store?.name ?? ''}`;
+    }
+    if (trendView === 'brand' && selectedTrendBrandId) {
+      const brand = brands.find((b) => b.id === selectedTrendBrandId);
+      return `${monthLabel} · ${brand?.name ?? ''}`;
+    }
+    return `${monthLabel} · 全局趋势`;
   },
 }));

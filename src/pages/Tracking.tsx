@@ -24,6 +24,11 @@ import {
   UserCircle,
   CalendarDays,
   StickyNote,
+  CheckSquare,
+  Square,
+  Users2,
+  ClipboardList,
+  MessageSquareText,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useTrackingStore } from '@/store/useTrackingStore';
@@ -47,11 +52,17 @@ export function Tracking() {
     setRecallTaskFilterStore,
     setRecallTaskFilterBatch,
     setRecallTaskFilterStatus,
+    setRecallTaskFilterOwner,
+    setRecallTaskFilterOverdue,
     updateRecallOwner,
     updatePlannedReviewDate,
     updateContactNotes,
     batchRecallAndEnterView,
     setShowRecallView,
+    batchAssignOwner,
+    batchSetPlannedDate,
+    addContactLog,
+    getUniqueOwners,
   } = useTrackingStore();
 
   const [expandedStores, setExpandedStores] = useState<Set<string>>(new Set());
@@ -60,6 +71,13 @@ export function Tracking() {
   const [reviewNote, setReviewNote] = useState<string>('');
   const [editingCell, setEditingCell] = useState<{ caseId: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [showContactPanel, setShowContactPanel] = useState<boolean>(false);
+  const [contactCase, setContactCase] = useState<TrackingCase | null>(null);
+  const [newContactContent, setNewContactContent] = useState<string>('');
+  const [newContactType, setNewContactType] = useState<string>('电话');
+  const [batchOwnerInput, setBatchOwnerInput] = useState<string>('');
+  const [batchDateInput, setBatchDateInput] = useState<string>('');
 
   const uniqueBatchNumbers = useMemo(() => {
     const batches = new Set<string>();
@@ -86,6 +104,14 @@ export function Tracking() {
     });
     return cases;
   }, [trackingResult]);
+
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   const filteredCases = useMemo(() => {
     let result = [...allCasesFlat];
@@ -116,12 +142,84 @@ export function Tracking() {
       result = result.filter((c) => c.recallStatus === statusValue);
     }
 
+    if (recallTaskFilters.owner) {
+      result = result.filter((c) => c.recallOwner === recallTaskFilters.owner);
+    }
+
+    if (recallTaskFilters.showOverdueOnly) {
+      const today = getTodayDateString();
+      result = result.filter(
+        (c) =>
+          c.plannedReviewDate &&
+          c.plannedReviewDate < today &&
+          (c.recallStatus === 'pending' || c.recallStatus === 'none')
+      );
+    }
+
     return result;
   }, [allCasesFlat, recallTaskFilters]);
+
+  const uniqueOwners = useMemo(() => getUniqueOwners(), [trackingResult, getUniqueOwners]);
+
+  const allSelected = filteredCases.length > 0 && filteredCases.every((c) => selectedCaseIds.has(c.caseId));
+  const someSelected = filteredCases.some((c) => selectedCaseIds.has(c.caseId));
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectedCaseIds(new Set());
+    } else {
+      const newSelected = new Set(selectedCaseIds);
+      filteredCases.forEach((c) => newSelected.add(c.caseId));
+      setSelectedCaseIds(newSelected);
+    }
+  };
+
+  const handleSelectCase = (caseId: string) => {
+    const newSelected = new Set(selectedCaseIds);
+    if (newSelected.has(caseId)) {
+      newSelected.delete(caseId);
+    } else {
+      newSelected.add(caseId);
+    }
+    setSelectedCaseIds(newSelected);
+  };
+
+  const handleBatchAssignOwner = () => {
+    if (selectedCaseIds.size === 0 || !batchOwnerInput.trim()) return;
+    batchAssignOwner(Array.from(selectedCaseIds), batchOwnerInput.trim());
+    setBatchOwnerInput('');
+  };
+
+  const handleBatchSetPlannedDate = () => {
+    if (selectedCaseIds.size === 0 || !batchDateInput) return;
+    batchSetPlannedDate(Array.from(selectedCaseIds), batchDateInput);
+    setBatchDateInput('');
+  };
+
+  const openContactPanel = (caseItem: TrackingCase) => {
+    setContactCase(caseItem);
+    setShowContactPanel(true);
+    setNewContactContent('');
+    setNewContactType('电话');
+  };
+
+  const closeContactPanel = () => {
+    setShowContactPanel(false);
+    setContactCase(null);
+    setNewContactContent('');
+    setNewContactType('电话');
+  };
+
+  const handleAddContactLog = () => {
+    if (!contactCase || !newContactContent.trim()) return;
+    addContactLog(contactCase.caseId, newContactContent.trim(), newContactType);
+    setNewContactContent('');
+  };
 
   const handleSearch = () => {
     if (searchKeyword.trim()) {
       searchBatches(searchKeyword);
+      setSelectedCaseIds(new Set());
     }
   };
 
@@ -167,6 +265,36 @@ export function Tracking() {
         return <StatusBadge variant="danger">无法联系</StatusBadge>;
       default:
         return <StatusBadge variant="default">未召回</StatusBadge>;
+    }
+  };
+
+  const getContactTypeLabel = (type: string) => {
+    switch (type) {
+      case '电话':
+        return '电话';
+      case '短信':
+        return '短信';
+      case '面诊':
+        return '面诊';
+      case '其他':
+        return '其他';
+      default:
+        return type;
+    }
+  };
+
+  const getContactTypeBadgeColor = (type: string) => {
+    switch (type) {
+      case '电话':
+        return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
+      case '短信':
+        return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+      case '面诊':
+        return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+      case '其他':
+        return 'bg-slate-500/10 text-slate-400 border-slate-500/30';
+      default:
+        return 'bg-slate-500/10 text-slate-400 border-slate-500/30';
     }
   };
 
@@ -220,6 +348,21 @@ export function Tracking() {
     }
   };
 
+  const formatLogTimestamp = (dateStr: string) => {
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const startEditing = (caseId: string, field: string, currentValue: string | undefined) => {
     setEditingCell({ caseId, field });
     setEditValue(currentValue || '');
@@ -252,6 +395,17 @@ export function Tracking() {
       saveEditing();
     }
   };
+
+  const sortedContactLogs = useMemo(() => {
+    if (!contactCase?.contactLogs) return [];
+    return [...contactCase.contactLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [contactCase]);
+
+  const currentCaseForPanel = useMemo(() => {
+    if (!contactCase) return null;
+    const found = allCasesFlat.find((c) => c.caseId === contactCase.caseId);
+    return found || contactCase;
+  }, [contactCase, allCasesFlat]);
 
   return (
     <div className="space-y-6">
@@ -300,6 +454,7 @@ export function Tracking() {
                   onClick={() => {
                     setSearchKeyword(keyword);
                     searchBatches(keyword);
+                    setSelectedCaseIds(new Set());
                   }}
                   className="px-3 py-1 text-xs bg-slate-700/50 text-slate-300 rounded-full hover:bg-slate-700 hover:text-white transition-colors font-mono"
                 >
@@ -480,17 +635,129 @@ export function Tracking() {
                     </select>
                   </div>
 
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-400 whitespace-nowrap flex items-center gap-1.5">
+                      <Users2 className="w-3.5 h-3.5" />
+                      负责人筛选:
+                    </label>
+                    <select
+                      value={recallTaskFilters.owner || ''}
+                      onChange={(e) => setRecallTaskFilterOwner(e.target.value || null)}
+                      className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all min-w-[150px]"
+                    >
+                      <option value="">全部负责人</option>
+                      {uniqueOwners.map((owner) => (
+                        <option key={owner} value={owner}>
+                          {owner}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-slate-400 whitespace-nowrap flex items-center gap-1.5">
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      逾期状态:
+                    </label>
+                    <button
+                      onClick={() => setRecallTaskFilterOverdue(!recallTaskFilters.showOverdueOnly)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors border',
+                        recallTaskFilters.showOverdueOnly
+                          ? 'bg-red-500/20 text-red-400 border-red-500/50'
+                          : 'bg-slate-900 text-slate-300 border-slate-600 hover:border-slate-500'
+                      )}
+                    >
+                      {recallTaskFilters.showOverdueOnly ? (
+                        <CheckSquare className="w-4 h-4" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                      仅显示逾期
+                    </button>
+                  </div>
+
                   <div className="ml-auto text-sm text-slate-400">
                     共 <span className="text-teal-400 font-semibold">{filteredCases.length}</span> 条记录
                   </div>
                 </div>
               </div>
 
+              {selectedCaseIds.size > 0 && (
+                <div className="bg-amber-500/10 backdrop-blur border border-amber-500/30 rounded-xl p-4">
+                  <div className="flex items-center gap-6 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <CheckSquare className="w-5 h-5 text-amber-400" />
+                      <span className="text-sm font-medium text-amber-400">
+                        已选 {selectedCaseIds.size} 位患者
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-slate-400 whitespace-nowrap">批量分派负责人:</label>
+                      <input
+                        type="text"
+                        value={batchOwnerInput}
+                        onChange={(e) => setBatchOwnerInput(e.target.value)}
+                        placeholder="输入负责人姓名"
+                        className="px-3 py-1.5 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all w-[150px]"
+                      />
+                      <button
+                        onClick={handleBatchAssignOwner}
+                        disabled={!batchOwnerInput.trim()}
+                        className="px-3 py-1.5 text-sm bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors font-medium"
+                      >
+                        分派
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-slate-400 whitespace-nowrap">批量设置计划日期:</label>
+                      <input
+                        type="date"
+                        value={batchDateInput}
+                        onChange={(e) => setBatchDateInput(e.target.value)}
+                        className="px-3 py-1.5 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                      />
+                      <button
+                        onClick={handleBatchSetPlannedDate}
+                        disabled={!batchDateInput}
+                        className="px-3 py-1.5 text-sm bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors font-medium"
+                      >
+                        设置
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => setSelectedCaseIds(new Set())}
+                      className="ml-auto text-sm text-slate-400 hover:text-white transition-colors"
+                    >
+                      取消选择
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl overflow-hidden">
                 <div className="bg-slate-900/50 overflow-hidden border border-slate-700/30">
                   <table className="w-full">
                     <thead className="bg-slate-800/50">
                       <tr>
+                        <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3 w-12">
+                          <button
+                            onClick={handleSelectAll}
+                            className="text-slate-400 hover:text-white transition-colors"
+                            title={allSelected ? '取消全选' : '全选'}
+                          >
+                            {allSelected ? (
+                              <CheckSquare className="w-4 h-4 text-teal-400" />
+                            ) : someSelected ? (
+                              <CheckSquare className="w-4 h-4 text-slate-500 opacity-60" />
+                            ) : (
+                              <Square className="w-4 h-4" />
+                            )}
+                          </button>
+                        </th>
                         <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-4 py-3">
                           患者姓名
                         </th>
@@ -530,158 +797,200 @@ export function Tracking() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/50">
-                      {filteredCases.map((caseItem) => (
-                        <tr
-                          key={caseItem.caseId}
-                          className="hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
-                                <User className="w-4 h-4 text-slate-400" />
-                              </div>
-                              <span className="text-sm text-slate-200 font-medium">
-                                {caseItem.patientName}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <Store className="w-3.5 h-3.5 text-slate-500" />
-                              <span className="text-sm text-slate-300">
-                                {caseItem.storeName}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-sm text-slate-300 font-mono">
-                              {caseItem.batchNumber}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 text-sm font-mono">
-                              {caseItem.toothPosition}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-sm text-slate-400">
-                              {caseItem.surgeryDate}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              <Stethoscope className="w-3.5 h-3.5 text-slate-500" />
-                              <span className="text-sm text-slate-300">
-                                {caseItem.doctorName}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'recallOwner' ? (
-                              <input
-                                type="text"
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={saveEditing}
-                                onKeyDown={handleEditKeyDown}
-                                autoFocus
-                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                              />
-                            ) : (
-                              <div
-                                onClick={() => startEditing(caseItem.caseId, 'recallOwner', caseItem.recallOwner)}
-                                className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
-                              >
-                                <UserCircle className="w-3.5 h-3.5 text-slate-500" />
-                                <span className="text-sm text-slate-300">
-                                  {caseItem.recallOwner || <span className="text-slate-500">点击分配</span>}
-                                </span>
-                              </div>
+                      {filteredCases.map((caseItem) => {
+                        const isOverdue =
+                          caseItem.plannedReviewDate &&
+                          caseItem.plannedReviewDate < getTodayDateString() &&
+                          (caseItem.recallStatus === 'pending' || caseItem.recallStatus === 'none');
+
+                        return (
+                          <tr
+                            key={caseItem.caseId}
+                            className={cn(
+                              'hover:bg-slate-800/30 transition-colors',
+                              isOverdue && recallTaskFilters.showOverdueOnly === false && 'bg-red-500/5'
                             )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'plannedReviewDate' ? (
-                              <input
-                                type="date"
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={saveEditing}
-                                autoFocus
-                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                              />
-                            ) : (
-                              <div
-                                onClick={() => startEditing(caseItem.caseId, 'plannedReviewDate', caseItem.plannedReviewDate)}
-                                className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
-                              >
-                                <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
-                                <span className="text-sm text-slate-300">
-                                  {caseItem.plannedReviewDate || <span className="text-slate-500">点击设置</span>}
-                                </span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {getRecallStatusBadge(caseItem.recallStatus)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="text-sm text-slate-400">
-                              {formatContactedAt(caseItem.recallResult?.contactedAt)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 max-w-[200px]">
-                            {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'contactNotes' ? (
-                              <textarea
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={saveEditing}
-                                autoFocus
-                                rows={2}
-                                className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 resize-none"
-                              />
-                            ) : (
-                              <div
-                                onClick={() => startEditing(caseItem.caseId, 'contactNotes', caseItem.contactNotes)}
-                                className="flex items-start gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
-                              >
-                                <StickyNote className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
-                                <span className="text-sm text-slate-300">
-                                  {caseItem.contactNotes || <span className="text-slate-500">点击添加</span>}
-                                </span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            {(caseItem.recallStatus === 'pending' || caseItem.recallStatus === 'none') && (
-                              <div className="flex items-center gap-2 justify-end">
-                                <button
-                                  onClick={() => openReviewModal(caseItem, 'completed')}
-                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5"
-                                >
-                                  <UserCheck className="w-3.5 h-3.5" />
-                                  标记已复查
-                                </button>
-                                <button
-                                  onClick={() => openReviewModal(caseItem, 'unreachable')}
-                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 flex items-center gap-1.5"
-                                >
-                                  <PhoneOff className="w-3.5 h-3.5" />
-                                  无法联系
-                                </button>
-                              </div>
-                            )}
-                            {(caseItem.recallStatus === 'completed' || caseItem.recallStatus === 'unreachable') && (
+                          >
+                            <td className="px-4 py-3">
                               <button
-                                onClick={() => handleReset(caseItem)}
-                                className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center gap-1.5 ml-auto"
+                                onClick={() => handleSelectCase(caseItem.caseId)}
+                                className="text-slate-400 hover:text-white transition-colors"
                               >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                                重置
+                                {selectedCaseIds.has(caseItem.caseId) ? (
+                                  <CheckSquare className="w-4 h-4 text-teal-400" />
+                                ) : (
+                                  <Square className="w-4 h-4" />
+                                )}
                               </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                                  <User className="w-4 h-4 text-slate-400" />
+                                </div>
+                                <button
+                                  onClick={() => openContactPanel(caseItem)}
+                                  className="text-sm text-slate-200 font-medium hover:text-teal-400 transition-colors text-left"
+                                >
+                                  {caseItem.patientName}
+                                </button>
+                                {isOverdue && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                                    逾期
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <Store className="w-3.5 h-3.5 text-slate-500" />
+                                <span className="text-sm text-slate-300">
+                                  {caseItem.storeName}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="text-sm text-slate-300 font-mono">
+                                {caseItem.batchNumber}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 text-sm font-mono">
+                                {caseItem.toothPosition}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="text-sm text-slate-400">
+                                {caseItem.surgeryDate}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <Stethoscope className="w-3.5 h-3.5 text-slate-500" />
+                                <span className="text-sm text-slate-300">
+                                  {caseItem.doctorName}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'recallOwner' ? (
+                                <input
+                                  type="text"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onBlur={saveEditing}
+                                  onKeyDown={handleEditKeyDown}
+                                  autoFocus
+                                  className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                                />
+                              ) : (
+                                <div
+                                  onClick={() => startEditing(caseItem.caseId, 'recallOwner', caseItem.recallOwner)}
+                                  className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                                >
+                                  <UserCircle className="w-3.5 h-3.5 text-slate-500" />
+                                  <span className="text-sm text-slate-300">
+                                    {caseItem.recallOwner || <span className="text-slate-500">点击分配</span>}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'plannedReviewDate' ? (
+                                <input
+                                  type="date"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onBlur={saveEditing}
+                                  autoFocus
+                                  className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                                />
+                              ) : (
+                                <div
+                                  onClick={() => startEditing(caseItem.caseId, 'plannedReviewDate', caseItem.plannedReviewDate)}
+                                  className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                                >
+                                  <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
+                                  <span className={cn(
+                                    'text-sm',
+                                    isOverdue ? 'text-red-400' : 'text-slate-300'
+                                  )}>
+                                    {caseItem.plannedReviewDate || <span className="text-slate-500">点击设置</span>}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {getRecallStatusBadge(caseItem.recallStatus)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="text-sm text-slate-400">
+                                {formatContactedAt(caseItem.recallResult?.contactedAt)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 max-w-[200px]">
+                              {editingCell?.caseId === caseItem.caseId && editingCell?.field === 'contactNotes' ? (
+                                <textarea
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onBlur={saveEditing}
+                                  autoFocus
+                                  rows={2}
+                                  className="w-full px-2 py-1 bg-slate-900 border border-teal-500 rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 resize-none"
+                                />
+                              ) : (
+                                <div
+                                  onClick={() => startEditing(caseItem.caseId, 'contactNotes', caseItem.contactNotes)}
+                                  className="flex items-start gap-1.5 cursor-pointer hover:bg-slate-700/30 px-2 py-1 rounded transition-colors"
+                                >
+                                  <StickyNote className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+                                  <span className="text-sm text-slate-300">
+                                    {caseItem.contactNotes || <span className="text-slate-500">点击添加</span>}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center gap-2 justify-end flex-wrap">
+                                <button
+                                  onClick={() => openContactPanel(caseItem)}
+                                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600 flex items-center gap-1.5"
+                                >
+                                  <MessageSquareText className="w-3.5 h-3.5" />
+                                  联系记录
+                                </button>
+                                {(caseItem.recallStatus === 'pending' || caseItem.recallStatus === 'none') && (
+                                  <>
+                                    <button
+                                      onClick={() => openReviewModal(caseItem, 'completed')}
+                                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5"
+                                    >
+                                      <UserCheck className="w-3.5 h-3.5" />
+                                      标记已复查
+                                    </button>
+                                    <button
+                                      onClick={() => openReviewModal(caseItem, 'unreachable')}
+                                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 flex items-center gap-1.5"
+                                    >
+                                      <PhoneOff className="w-3.5 h-3.5" />
+                                      无法联系
+                                    </button>
+                                  </>
+                                )}
+                                {(caseItem.recallStatus === 'completed' || caseItem.recallStatus === 'unreachable') && (
+                                  <button
+                                    onClick={() => handleReset(caseItem)}
+                                    className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center gap-1.5 ml-auto"
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    重置
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -984,6 +1293,129 @@ export function Tracking() {
               >
                 确认
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContactPanel && currentCaseForPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <MessageSquareText className="w-5 h-5 text-teal-400" />
+                <h3 className="text-lg font-semibold text-white">
+                  联系记录 - {currentCaseForPanel.patientName}
+                </h3>
+              </div>
+              <button
+                onClick={closeContactPanel}
+                className="p-1.5 rounded-lg hover:bg-slate-700/50 text-slate-400 hover:text-white transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center">
+                    <User className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <div>
+                    <p className="text-base font-medium text-white">{currentCaseForPanel.patientName}</p>
+                    <p className="text-sm text-slate-400">
+                      {currentCaseForPanel.toothPosition} · {currentCaseForPanel.surgeryDate}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-slate-400" />
+                  联系历史
+                </h4>
+
+                {sortedContactLogs.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    暂无联系记录
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute left-3 top-2 bottom-2 w-px bg-slate-700" />
+                    <div className="space-y-4">
+                      {sortedContactLogs.map((log) => (
+                        <div key={log.id} className="relative pl-8">
+                          <div className="absolute left-1.5 top-1.5 w-3 h-3 rounded-full bg-teal-500 border-2 border-slate-800" />
+                          <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={cn(
+                                'text-xs px-2 py-0.5 rounded border',
+                                getContactTypeBadgeColor(log.contactType)
+                              )}>
+                                {getContactTypeLabel(log.contactType)}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {formatLogTimestamp(log.timestamp)}
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-300 whitespace-pre-wrap">
+                              {log.content}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-700/50 p-4 flex-shrink-0">
+                <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+                  <MessageSquareText className="w-4 h-4 text-teal-400" />
+                  添加联系记录
+                </h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5">
+                      联系类型
+                    </label>
+                    <select
+                      value={newContactType}
+                      onChange={(e) => setNewContactType(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all"
+                    >
+                      <option value="电话">电话</option>
+                      <option value="短信">短信</option>
+                      <option value="面诊">面诊</option>
+                      <option value="其他">其他</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5">
+                      联系内容
+                    </label>
+                    <textarea
+                      value={newContactContent}
+                      onChange={(e) => setNewContactContent(e.target.value)}
+                      placeholder="请输入联系内容..."
+                      rows={3}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 transition-all resize-none"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleAddContactLog}
+                      disabled={!newContactContent.trim()}
+                      className="px-4 py-2 text-sm font-medium text-white bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <CheckSquare className="w-4 h-4" />
+                      添加记录
+                    </button>
+                  </div>
+                </div>
             </div>
           </div>
         </div>

@@ -16,6 +16,9 @@ import {
   ThumbsDown,
   CalendarDays,
   Info,
+  RotateCcw,
+  SearchX,
+  Archive,
   type LucideIcon
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -116,7 +119,9 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
   const [selectedCorrectionId, setSelectedCorrectionId] = useState<string | null>(null);
   const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
-  const { addCorrection, resolveAnomaly, rejectCorrection, approveCorrection } = useAnomalyStore();
+  const [reopenDialogOpen, setReopenDialogOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const { addCorrection, resolveAnomaly, rejectCorrection, approveCorrection, reopenAnomaly } = useAnomalyStore();
 
   const handleSend = () => {
     if (message.trim()) {
@@ -178,11 +183,29 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
     setRejectNote('');
   };
 
+  const handleOpenReopenDialog = () => {
+    setReopenReason('');
+    setReopenDialogOpen(true);
+  };
+
+  const handleConfirmReopen = () => {
+    if (!anomaly || !reopenReason.trim()) return;
+    reopenAnomaly(anomaly.id, reopenReason.trim());
+    setReopenDialogOpen(false);
+    setReopenReason('');
+  };
+
+  const handleCancelReopen = () => {
+    setReopenDialogOpen(false);
+    setReopenReason('');
+  };
+
   if (!anomaly) return null;
 
   const store = stores.find((s) => s.id === anomaly.storeId);
   const typeConfig = anomalyTypeConfig[anomaly.type];
   const hasApprovedCorrection = anomaly.corrections.some((c) => c.status === 'approved');
+  const isResolved = anomaly.status === 'resolved';
 
   return (
     <div className="fixed inset-y-0 right-0 w-96 bg-slate-800 border-l border-slate-700 shadow-2xl z-50 flex flex-col animate-[slideIn_0.3s_ease-out]">
@@ -192,6 +215,15 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           <p className="text-xs text-slate-400 mt-0.5">留言督办</p>
         </div>
         <div className="flex items-center gap-2">
+          {isResolved && (
+            <button
+              onClick={handleOpenReopenDialog}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>重新开启异常</span>
+            </button>
+          )}
           {anomaly.status === 'processing' && hasApprovedCorrection && (
             <button
               onClick={handleResolve}
@@ -209,6 +241,13 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           </button>
         </div>
       </div>
+
+      {isResolved && (
+        <div className="px-4 py-3 bg-emerald-600/10 border-b border-emerald-500/30 flex items-center gap-2">
+          <Archive className="w-4 h-4 text-emerald-400" />
+          <span className="text-sm font-medium text-emerald-400">已归档</span>
+        </div>
+      )}
 
       <div className="p-4 border-b border-slate-700 space-y-3">
         <div className="flex items-center gap-3">
@@ -334,7 +373,7 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
                   </div>
                 )}
 
-                {anomaly.status !== 'resolved' && correction.status === 'pending_review' && (
+                {!isResolved && correction.status === 'pending_review' && (
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       onClick={() => handleApprove(correction.id)}
@@ -409,55 +448,88 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
                 </div>
               </div>
             )}
+
+            {anomaly.reopenCount > 0 && anomaly.reopenedAt && (
+              <div className="p-4 bg-indigo-600/10 border border-indigo-500/30 rounded-lg space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-indigo-600 rounded-full">
+                    <RotateCcw className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-sm font-semibold text-indigo-400">异常已重新开启</p>
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-indigo-300/70">重启次数</span>
+                    <span className="text-indigo-200">{anomaly.reopenCount} 次</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-indigo-300/70">重启人</span>
+                    <span className="text-indigo-200">{anomaly.reopenedBy}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-indigo-300/70">重启时间</span>
+                    <span className="text-indigo-200">{anomaly.reopenedAt}</span>
+                  </div>
+                  {anomaly.reopenReason && (
+                    <div className="pt-2 mt-2 border-t border-indigo-500/20">
+                      <p className="text-indigo-300/70 mb-1">重启原因</p>
+                      <p className="text-indigo-200">{anomaly.reopenReason}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <div className="p-4 border-t border-slate-700 space-y-3">
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">门店补正</p>
-          <textarea
-            value={correctionNote}
-            onChange={(e) => setCorrectionNote(e.target.value)}
-            placeholder="输入补正说明..."
-            rows={2}
-            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all"
-          />
-          <div className="flex items-center gap-2">
+      {!isResolved && (
+        <div className="p-4 border-t border-slate-700 space-y-3">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">门店补正</p>
+            <textarea
+              value={correctionNote}
+              onChange={(e) => setCorrectionNote(e.target.value)}
+              placeholder="输入补正说明..."
+              rows={2}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleAttachFile}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+                <span>{attachmentName || '上传出库单/病例截图'}</span>
+              </button>
+              <button
+                onClick={handleSubmitCorrection}
+                disabled={!correctionNote.trim()}
+                className="ml-auto px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-lg transition-colors"
+              >
+                提交补正
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-end gap-2">
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="输入留言内容，发送给门店..."
+              rows={3}
+              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all"
+            />
             <button
-              onClick={handleAttachFile}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors"
+              onClick={handleSend}
+              disabled={!message.trim()}
+              className="p-3 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
             >
-              <Paperclip className="w-3.5 h-3.5" />
-              <span>{attachmentName || '上传出库单/病例截图'}</span>
-            </button>
-            <button
-              onClick={handleSubmitCorrection}
-              disabled={!correctionNote.trim()}
-              className="ml-auto px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-lg transition-colors"
-            >
-              提交补正
+              <Send className="w-5 h-5" />
             </button>
           </div>
         </div>
-
-        <div className="flex items-end gap-2">
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="输入留言内容，发送给门店..."
-            rows={3}
-            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!message.trim()}
-            className="p-3 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg transition-colors"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
+      )}
 
       {resolveDialogOpen && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
@@ -489,6 +561,37 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           </div>
         </div>
       )}
+
+      {reopenDialogOpen && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+          <div className="bg-slate-800 border border-slate-600 rounded-lg p-4 w-72 space-y-3 shadow-2xl">
+            <p className="text-sm font-medium text-white">重新开启异常</p>
+            <p className="text-xs text-slate-400">请输入重启原因</p>
+            <textarea
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              placeholder="请输入重启原因..."
+              rows={3}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={handleCancelReopen}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-md transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmReopen}
+                disabled={!reopenReason.trim()}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-md transition-colors"
+              >
+                确认重启
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -500,6 +603,7 @@ export function Anomalies() {
     selectedStore,
     selectedStatus,
     activeAnomalyId,
+    trendFilter,
     setSelectedType,
     setSelectedStore,
     setSelectedStatus,
@@ -508,6 +612,8 @@ export function Anomalies() {
     getFilteredAnomalies,
     computeStats,
     anomalies,
+    clearTrendFilter,
+    getTrendFilterLabel,
   } = useAnomalyStore();
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -550,6 +656,24 @@ export function Anomalies() {
 
   return (
     <div className={`space-y-6 transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}>
+      {trendFilter && (
+        <div className="flex items-center justify-between px-4 py-3 bg-teal-500/10 border border-teal-500/30 rounded-xl">
+          <div className="flex items-center gap-2">
+            <SearchX className="w-4 h-4 text-teal-400" />
+            <span className="text-sm text-teal-300">
+              🔍 当前钻取范围：{getTrendFilterLabel()}
+            </span>
+          </div>
+          <button
+            onClick={clearTrendFilter}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600/20 hover:bg-teal-600/30 text-teal-400 text-xs font-medium rounded-lg transition-colors border border-teal-500/30"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>清除筛选</span>
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {(Object.keys(anomalyTypeConfig) as AnomalyType[]).map((type) => {
           const config = anomalyTypeConfig[type];
@@ -837,6 +961,11 @@ export function Anomalies() {
                           <StatusBadge variant={correctionsSummary.variant}>
                             {correctionsSummary.label}
                           </StatusBadge>
+                        )}
+                        {anomaly.reopenCount > 0 && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                            重启{anomaly.reopenCount}次
+                          </span>
                         )}
                       </div>
                     </td>

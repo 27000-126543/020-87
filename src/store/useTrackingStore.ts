@@ -7,11 +7,18 @@ interface TrackingState {
   trackingResult: BatchTrackingGroup[];
   searchHistory: string[];
   isSearching: boolean;
-  recallTaskFilters: { storeId: string | null; batchNumber: string | null; recallStatus: string | null };
+  recallTaskFilters: {
+    storeId: string | null;
+    batchNumber: string | null;
+    recallStatus: string | null;
+    owner: string | null;
+    showOverdueOnly: boolean;
+  };
   showRecallView: boolean;
   setSearchKeyword: (keyword: string) => void;
   searchBatch: (batchNumber: string) => void;
   searchBatches: (input: string) => void;
+  searchBatchesFuzzy: (input: string) => void;
   clearSearch: () => void;
   updateRecallStatus: (caseId: string, status: 'none' | 'pending' | 'completed' | 'unreachable') => void;
   batchRecall: () => void;
@@ -20,20 +27,24 @@ interface TrackingState {
   setRecallTaskFilterStore: (storeId: string | null) => void;
   setRecallTaskFilterBatch: (batchNumber: string | null) => void;
   setRecallTaskFilterStatus: (status: string | null) => void;
+  setRecallTaskFilterOwner: (owner: string | null) => void;
+  setRecallTaskFilterOverdue: (show: boolean) => void;
   updateRecallOwner: (caseId: string, owner: string) => void;
   updatePlannedReviewDate: (caseId: string, date: string) => void;
   updateContactNotes: (caseId: string, notes: string) => void;
   batchRecallAndEnterView: () => void;
   setShowRecallView: (show: boolean) => void;
+  batchAssignOwner: (caseIds: string[], owner: string) => void;
+  batchSetPlannedDate: (caseIds: string[], date: string) => void;
+  addContactLog: (caseId: string, content: string, contactType: string) => void;
+  getUniqueOwners: () => string[];
 }
 
-function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null {
-  const keywordLower = batchNumber.toLowerCase().trim();
-  if (!keywordLower) return null;
+function buildGroupForBatch(batchNumber: string): BatchTrackingGroup | null {
+  const trimmed = batchNumber.trim();
+  if (!trimmed) return null;
 
-  const matchedBatches = implantBatches.filter((b) =>
-    b.batchNumber.toLowerCase().includes(keywordLower)
-  );
+  const matchedBatches = implantBatches.filter((b) => b.batchNumber === trimmed);
 
   if (matchedBatches.length === 0) return null;
 
@@ -80,9 +91,10 @@ function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null
           storeId: store.id,
           storeName: store.name,
           batchNumber: firstBatch.batchNumber,
-          recallOwner: undefined,
-          plannedReviewDate: undefined,
-          contactNotes: undefined,
+          recallOwner: caseItem.recallOwner,
+          plannedReviewDate: caseItem.plannedReviewDate,
+          contactNotes: caseItem.contactNotes,
+          contactLogs: caseItem.contactLogs || [],
         });
       });
 
@@ -115,12 +127,42 @@ function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null
   };
 }
 
+function buildFuzzySearchResults(input: string): BatchTrackingGroup[] {
+  const keywords = input
+    .split(/[,，\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  const uniqueKeywords = [...new Set(keywords)];
+
+  const matchedBatchNumbers = new Set<string>();
+
+  uniqueKeywords.forEach((keyword) => {
+    const kwLower = keyword.toLowerCase();
+    implantBatches.forEach((batch) => {
+      if (batch.batchNumber.toLowerCase().includes(kwLower)) {
+        matchedBatchNumbers.add(batch.batchNumber);
+      }
+    });
+  });
+
+  const results: BatchTrackingGroup[] = [];
+  matchedBatchNumbers.forEach((bn) => {
+    const group = buildGroupForBatch(bn);
+    if (group) {
+      results.push(group);
+    }
+  });
+
+  return results;
+}
+
 export const useTrackingStore = create<TrackingState>((set, get) => ({
   searchKeyword: '',
   trackingResult: [],
   searchHistory: ['NB-2025-0315', 'STM-2025-0620', 'OS-2025-0228'],
   isSearching: false,
-  recallTaskFilters: { storeId: null, batchNumber: null, recallStatus: null },
+  recallTaskFilters: { storeId: null, batchNumber: null, recallStatus: null, owner: null, showOverdueOnly: false },
   showRecallView: false,
 
   setSearchKeyword: (keyword) => {
@@ -129,7 +171,7 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
 
   searchBatch: (batchNumber) => {
     set({ isSearching: true });
-    const group = buildBatchTrackingGroup(batchNumber);
+    const group = buildGroupForBatch(batchNumber);
     const results = group ? [group] : [];
 
     set((state) => {
@@ -158,7 +200,7 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
 
     const results: BatchTrackingGroup[] = [];
     uniqueBatchNumbers.forEach((bn) => {
-      const group = buildBatchTrackingGroup(bn);
+      const group = buildGroupForBatch(bn);
       if (group) {
         results.push(group);
       }
@@ -170,6 +212,36 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
         const idx = history.indexOf(bn);
         if (idx !== -1) history.splice(idx, 1);
         history.unshift(bn);
+      });
+      const newHistory = history.slice(0, 10);
+
+      return {
+        trackingResult: results,
+        searchKeyword: input,
+        searchHistory: newHistory,
+        isSearching: false,
+      };
+    });
+  },
+
+  searchBatchesFuzzy: (input) => {
+    set({ isSearching: true });
+
+    const results = buildFuzzySearchResults(input);
+
+    const keywords = input
+      .split(/[,，\n]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    const uniqueKeywords = [...new Set(keywords)];
+
+    set((state) => {
+      const history = [...state.searchHistory];
+      uniqueKeywords.forEach((kw) => {
+        const idx = history.indexOf(kw);
+        if (idx !== -1) history.splice(idx, 1);
+        history.unshift(kw);
       });
       const newHistory = history.slice(0, 10);
 
@@ -318,6 +390,14 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
     set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, recallStatus: status } }));
   },
 
+  setRecallTaskFilterOwner: (owner) => {
+    set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, owner } }));
+  },
+
+  setRecallTaskFilterOverdue: (show) => {
+    set((state) => ({ recallTaskFilters: { ...state.recallTaskFilters, showOverdueOnly: show } }));
+  },
+
   updateRecallOwner: (caseId, owner) => {
     set((state) => ({
       trackingResult: state.trackingResult.map((group) => ({
@@ -367,5 +447,73 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
 
   setShowRecallView: (show) => {
     set({ showRecallView: show });
+  },
+
+  batchAssignOwner: (caseIds, owner) => {
+    const caseIdSet = new Set(caseIds);
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            caseIdSet.has(c.caseId) ? { ...c, recallOwner: owner } : c
+          ),
+        })),
+      })),
+    }));
+  },
+
+  batchSetPlannedDate: (caseIds, date) => {
+    const caseIdSet = new Set(caseIds);
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            caseIdSet.has(c.caseId) ? { ...c, plannedReviewDate: date } : c
+          ),
+        })),
+      })),
+    }));
+  },
+
+  addContactLog: (caseId, content, contactType) => {
+    const now = new Date().toISOString();
+    const newLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: now,
+      content,
+      contactType,
+    };
+    set((state) => ({
+      trackingResult: state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) => {
+            if (c.caseId !== caseId) return c;
+            const currentLogs = c.contactLogs || [];
+            return { ...c, contactLogs: [...currentLogs, newLog] };
+          }),
+        })),
+      })),
+    }));
+  },
+
+  getUniqueOwners: () => {
+    const state = get();
+    const owners = new Set<string>();
+    state.trackingResult.forEach((group) => {
+      group.storeDistributions.forEach((sd) => {
+        sd.cases.forEach((c) => {
+          if (c.recallOwner) {
+            owners.add(c.recallOwner);
+          }
+        });
+      });
+    });
+    return [...owners];
   },
 }));

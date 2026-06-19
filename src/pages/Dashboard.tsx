@@ -448,18 +448,20 @@ export function Dashboard() {
     if (!point) return;
     navigateWithTrendFilter(target, point);
     const params = getTrendJumpParams();
+    const { storeId, brandId, month } = params;
     if (target === 'anomalies') {
-      setTrendFilter(params);
+      setTrendFilter({ storeId, brandId, month });
+      setSelectedType(null);
       navigate('/anomalies');
     } else if (target === 'tracking') {
-      if (params.storeId) {
-        setRecallTaskFilterStore(params.storeId);
+      if (storeId) {
+        setRecallTaskFilterStore(storeId);
       }
       setShowRecallView(true);
       navigate('/tracking');
     } else if (target === 'unbound') {
+      setTrendFilter({ storeId, brandId, month });
       setSelectedType('unbound');
-      setTrendFilter(params);
       navigate('/anomalies');
     }
   };
@@ -836,10 +838,13 @@ export function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500" />
-              异常数量趋势
-            </h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                异常数量趋势
+              </h4>
+              <span className="text-xs text-slate-500">点击跳转明细</span>
+            </div>
             <div style={{ height: 180 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendSeries}>
@@ -862,10 +867,13 @@ export function Dashboard() {
           </div>
 
           <div>
-            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-teal-500" />
-              召回完成率
-            </h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-teal-500" />
+                召回完成率
+              </h4>
+              <span className="text-xs text-slate-500">点击跳转明细</span>
+            </div>
             <div style={{ height: 180 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={recallChartData}>
@@ -888,10 +896,13 @@ export function Dashboard() {
           </div>
 
           <div>
-            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
-              未绑定批号变化
-            </h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                未绑定批号变化
+              </h4>
+              <span className="text-xs text-slate-500">点击跳转明细</span>
+            </div>
             <div style={{ height: 180 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendSeries}>

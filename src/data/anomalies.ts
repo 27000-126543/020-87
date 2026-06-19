@@ -86,6 +86,7 @@ function generateExpiryAnomalies(): Anomaly[] {
       status: 'open',
       messages: [],
       corrections: [],
+      reopenCount: 0,
     });
 
     expiryIndex++;
@@ -118,6 +119,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a002',
@@ -130,6 +132,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a003',
@@ -148,6 +151,7 @@ const baseAnomalies: Anomaly[] = [
     resolvedAt: '2025-08-17 11:00',
     resolvedBy: '质控总部',
     resolvedNote: '补正资料审核通过，已完成病例绑定，异常关闭。',
+    reopenCount: 0,
   },
   {
     id: 'a004',
@@ -164,6 +168,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a005',
@@ -182,6 +187,7 @@ const baseAnomalies: Anomaly[] = [
       { id: 'm003', anomalyId: 'a005', sender: '质控总部', senderRole: 'headquarters', content: '请补全该病例的种植体批号信息，并提供出库单。', createdAt: '2025-08-12 09:15' },
     ],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a006',
@@ -198,6 +204,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a007',
@@ -217,6 +224,7 @@ const baseAnomalies: Anomaly[] = [
       { id: 'm005', anomalyId: 'a007', sender: '武汉江汉店', senderRole: 'store', content: '已核实，是护士录入错误，已更正。', createdAt: '2025-08-08 16:45' },
     ],
     corrections: correctionsFromHistory.a007,
+    reopenCount: 0,
   },
   {
     id: 'a012',
@@ -229,6 +237,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a013',
@@ -245,6 +254,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
   {
     id: 'a014',
@@ -267,6 +277,7 @@ const baseAnomalies: Anomaly[] = [
     resolvedAt: '2025-08-22 11:30',
     resolvedBy: '质控总部',
     resolvedNote: '补正资料审核通过，系统记录已更正，异常关闭。',
+    reopenCount: 0,
   },
   {
     id: 'a015',
@@ -279,6 +290,7 @@ const baseAnomalies: Anomaly[] = [
     status: 'open',
     messages: [],
     corrections: [],
+    reopenCount: 0,
   },
 ];
 

@@ -24,6 +24,9 @@ interface AnomalyState {
   computeStats: () => void;
   setTrendFilter: (filter: { storeId: string | null; brandId: string | null; month: string | null } | null) => void;
   closeAnomaly: (anomalyId: string, note: string) => void;
+  reopenAnomaly: (anomalyId: string, reason: string) => void;
+  clearTrendFilter: () => void;
+  getTrendFilterLabel: () => string;
 }
 
 function computeAnomalyStats(anomalyList: Anomaly[]): AnomalyStats {
@@ -168,6 +171,24 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     get().computeStats();
   },
 
+  reopenAnomaly: (anomalyId, reason) => {
+    set((state) => ({
+      anomalies: state.anomalies.map((a) =>
+        a.id === anomalyId
+          ? {
+              ...a,
+              status: 'processing' as AnomalyStatus,
+              reopenedAt: new Date().toLocaleString('zh-CN'),
+              reopenedBy: '质控总部',
+              reopenReason: reason,
+              reopenCount: (a.reopenCount || 0) + 1,
+            }
+          : a
+      ),
+    }));
+    get().computeStats();
+  },
+
   closeAnomaly: (anomalyId, note) => {
     get().resolveAnomaly(anomalyId, note);
   },
@@ -197,6 +218,9 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
     if (trendFilter && trendFilter.storeId) {
       filtered = filtered.filter((a) => a.storeId === trendFilter.storeId);
     }
+    if (trendFilter && trendFilter.month) {
+      filtered = filtered.filter((a) => a.discoveredAt.startsWith(trendFilter.month!));
+    }
 
     return filtered.sort((a, b) => {
       const severityOrder = { high: 0, medium: 1, low: 2 };
@@ -220,5 +244,31 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
       get().setSelectedStore(filter.storeId);
     }
     get().computeStats();
+  },
+
+  clearTrendFilter: () => {
+    set({ trendFilter: null });
+    get().computeStats();
+  },
+
+  getTrendFilterLabel: () => {
+    const { trendFilter } = get();
+    if (!trendFilter) return '';
+
+    const parts: string[] = [];
+
+    if (trendFilter.month) {
+      const [year, month] = trendFilter.month.split('-');
+      parts.push(`${year}年${parseInt(month)}月`);
+    }
+
+    if (trendFilter.storeId) {
+      const store = stores.find((s) => s.id === trendFilter.storeId);
+      if (store) {
+        parts.push(store.name);
+      }
+    }
+
+    return parts.join(' · ');
   },
 }));

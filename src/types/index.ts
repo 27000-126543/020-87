@@ -58,6 +58,7 @@ export interface PatientCase {
   recallOwner?: string;
   plannedReviewDate?: string;
   contactNotes?: string;
+  contactLogs?: { id: string; timestamp: string; content: string; contactType: string }[];
 }
 
 export type AnomalyType = 'missing' | 'duplicate' | 'expiry' | 'unbound';
@@ -122,6 +123,10 @@ export interface Anomaly {
   resolvedAt?: string;
   resolvedBy?: string;
   resolvedNote?: string;
+  reopenCount: number;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
 }
 
 export interface RiskTrendPoint {
@@ -246,6 +251,7 @@ export interface TrackingCase {
   storeId: string;
   storeName: string;
   batchNumber: string;
+  contactLogs?: { id: string; timestamp: string; content: string; contactType: string }[];
 }
 
 export interface AnomalyStats {
