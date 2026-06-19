@@ -10,14 +10,19 @@ import {
   ArrowLeft,
   XCircle,
   Copy,
+  TrendingDown,
+  BarChart3,
+  Building2,
+  Tag,
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend } from 'recharts';
 import { StatCard } from '@/components/StatCard';
 import { FilterBar } from '@/components/FilterBar';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useDashboardStore } from '@/store/useDashboardStore';
 import { useNavigate } from 'react-router-dom';
 import type { AnomalyType, Anomaly } from '@/types';
+import { stores, brands } from '@/data';
 import { cn } from '@/lib/utils';
 
 const anomalyTypeConfig: Record<AnomalyType, { label: string; icon: any; color: string; bg: string; border: string }> = {
@@ -320,6 +325,76 @@ function DrillDownView() {
   );
 }
 
+function TrendDropdown({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | null;
+  options: { id: string; label: string; subLabel?: string }[];
+  onChange: (value: string | null) => void;
+  placeholder: string;
+  icon: any;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedOption = options.find((o) => o.id === value);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-4 py-2.5 bg-slate-900/50 border border-slate-700 rounded-lg text-sm text-slate-200 hover:bg-slate-800 hover:border-slate-600 transition-colors min-w-[200px]"
+      >
+        <Icon className="w-4 h-4 text-slate-400" />
+        <span className={cn('flex-1 text-left truncate', !selectedOption && 'text-slate-500')}>
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        {value && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange(null);
+            }}
+            className="p-0.5 hover:bg-slate-700 rounded"
+          >
+            <XCircle className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+        )}
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 w-full min-w-[240px] max-h-64 overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 py-1">
+            {options.map((option) => (
+              <button
+                key={option.id}
+                onClick={() => {
+                  onChange(option.id);
+                  setIsOpen(false);
+                }}
+                className={cn(
+                  'w-full px-4 py-2 text-left text-sm hover:bg-slate-700 transition-colors',
+                  value === option.id ? 'text-teal-400 bg-teal-500/10' : 'text-slate-300'
+                )}
+              >
+                <div>{option.label}</div>
+                {option.subLabel && (
+                  <div className="text-xs text-slate-500 mt-0.5">{option.subLabel}</div>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const {
@@ -329,11 +404,18 @@ export function Dashboard() {
     expiringStock,
     unboundBatches,
     drillDownStoreId,
+    trendView,
+    selectedTrendStoreId,
+    selectedTrendBrandId,
     setBrandFilter,
     setStoreFilter,
     setDoctorFilter,
     setDrillDownStore,
     computeDashboardData,
+    setTrendView,
+    setSelectedTrendStore,
+    setSelectedTrendBrand,
+    getTrendSeries,
   } = useDashboardStore();
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -373,6 +455,53 @@ export function Dashboard() {
     }
     return null;
   };
+
+  const trendSeries = getTrendSeries();
+  const storeOptions = stores.map((s) => ({ id: s.id, label: s.name, subLabel: s.city }));
+  const brandOptions = brands.map((b) => ({ id: b.id, label: b.name, subLabel: b.country }));
+
+  const anomalyTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-xl">
+          <p className="text-sm font-medium text-slate-200">{label}</p>
+          <p className="text-red-400 font-semibold mt-1">{payload[0].value} 项</p>
+          <p className="text-xs text-slate-500 mt-1">点击查看异常列表</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const recallTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-xl">
+          <p className="text-sm font-medium text-slate-200">{label}</p>
+          <p className="text-teal-400 font-semibold mt-1">{Math.round(payload[0].value * 100)}%</p>
+          <p className="text-xs text-slate-500 mt-1">点击查看召回追踪</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const unboundTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-xl">
+          <p className="text-sm font-medium text-slate-200">{label}</p>
+          <p className="text-amber-400 font-semibold mt-1">{payload[0].value} 批</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const recallChartData = trendSeries.map((item) => ({
+    ...item,
+    recallCompletionPercent: item.recallCompletionRate * 100,
+  }));
 
   return (
     <div className={`space-y-6 transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}>
@@ -587,6 +716,162 @@ export function Dashboard() {
               <p className="text-sm">所有批号均已绑定病例</p>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-teal-400" />
+              风险趋势分析
+            </h3>
+            <p className="text-sm text-slate-400 mt-1">
+              按门店或品牌查看近6个月异常、召回完成率和未绑定批号变化
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <div className="flex items-center bg-slate-900/50 border border-slate-700 rounded-lg p-1">
+            <button
+              onClick={() => setTrendView('overall')}
+              className={cn(
+                'px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2',
+                trendView === 'overall'
+                  ? 'bg-teal-500/20 text-teal-400'
+                  : 'text-slate-400 hover:text-slate-200'
+              )}
+            >
+              <TrendingDown className="w-4 h-4" />
+              全局趋势
+            </button>
+            <button
+              onClick={() => setTrendView('store')}
+              className={cn(
+                'px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2',
+                trendView === 'store'
+                  ? 'bg-teal-500/20 text-teal-400'
+                  : 'text-slate-400 hover:text-slate-200'
+              )}
+            >
+              <Building2 className="w-4 h-4" />
+              按门店
+            </button>
+            <button
+              onClick={() => setTrendView('brand')}
+              className={cn(
+                'px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2',
+                trendView === 'brand'
+                  ? 'bg-teal-500/20 text-teal-400'
+                  : 'text-slate-400 hover:text-slate-200'
+              )}
+            >
+              <Tag className="w-4 h-4" />
+              按品牌
+            </button>
+          </div>
+
+          {trendView === 'store' && (
+            <TrendDropdown
+              label="门店"
+              value={selectedTrendStoreId}
+              options={storeOptions}
+              onChange={setSelectedTrendStore}
+              placeholder="选择门店"
+              icon={Building2}
+            />
+          )}
+
+          {trendView === 'brand' && (
+            <TrendDropdown
+              label="品牌"
+              value={selectedTrendBrandId}
+              options={brandOptions}
+              onChange={setSelectedTrendBrand}
+              placeholder="选择品牌"
+              icon={Tag}
+            />
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+              异常数量趋势
+            </h4>
+            <div style={{ height: 180 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendSeries}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickFormatter={(v) => v.slice(5)} />
+                  <YAxis stroke="#64748b" fontSize={11} width={30} />
+                  <Tooltip content={anomalyTooltip} />
+                  <Line
+                    type="monotone"
+                    dataKey="anomalyCount"
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: '#ef4444', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
+                    activeDot={{ r: 6, fill: '#ef4444', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
+                    onClick={() => navigate('/anomalies')}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-500" />
+              召回完成率
+            </h4>
+            <div style={{ height: 180 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={recallChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickFormatter={(v) => v.slice(5)} />
+                  <YAxis stroke="#64748b" fontSize={11} width={30} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip content={recallTooltip} />
+                  <Line
+                    type="monotone"
+                    dataKey="recallCompletionPercent"
+                    stroke="#0d9488"
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: '#0d9488', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
+                    activeDot={{ r: 6, fill: '#0d9488', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
+                    onClick={() => navigate('/tracking')}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              未绑定批号变化
+            </h4>
+            <div style={{ height: 180 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendSeries}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickFormatter={(v) => v.slice(5)} />
+                  <YAxis stroke="#64748b" fontSize={11} width={30} />
+                  <Tooltip content={unboundTooltip} />
+                  <Line
+                    type="monotone"
+                    dataKey="unboundCount"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    dot={{ r: 4, fill: '#f59e0b', stroke: '#1e293b', strokeWidth: 2, cursor: 'pointer' }}
+                    activeDot={{ r: 6, fill: '#f59e0b', stroke: '#fff', strokeWidth: 2, cursor: 'pointer' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -7,6 +7,8 @@ import type {
   UnboundBatchItem,
   FilterState,
   StoreDrillDownData,
+  RiskTrendData,
+  RiskTrendPoint,
 } from '@/types';
 import { daysFromNow, daysBetween } from '@/utils/date';
 
@@ -17,12 +19,20 @@ interface DashboardState {
   expiringStock: ExpiringStockItem[];
   unboundBatches: UnboundBatchItem[];
   drillDownStoreId: string | null;
+  trendView: 'overall' | 'store' | 'brand';
+  selectedTrendStoreId: string | null;
+  selectedTrendBrandId: string | null;
+  trendData: RiskTrendData;
   setBrandFilter: (brandId: string | null) => void;
   setStoreFilter: (storeId: string | null) => void;
   setDoctorFilter: (doctorId: string | null) => void;
   setDrillDownStore: (storeId: string | null) => void;
   getStoreDrillDown: (storeId: string) => StoreDrillDownData;
   computeDashboardData: () => void;
+  setTrendView: (view: 'overall' | 'store' | 'brand') => void;
+  setSelectedTrendStore: (storeId: string | null) => void;
+  setSelectedTrendBrand: (brandId: string | null) => void;
+  getTrendSeries: () => RiskTrendPoint[];
 }
 
 function computeStats(
@@ -162,6 +172,39 @@ function computeUnboundBatches(
   return items.sort((a, b) => b.daysSinceOutbound - a.daysSinceOutbound);
 }
 
+const MONTHS = ['2025-03', '2025-04', '2025-05', '2025-06', '2025-07', '2025-08'];
+
+function buildMockTrendData(): RiskTrendData {
+  const overall: RiskTrendPoint[] = MONTHS.map((month, i) => ({
+    month,
+    anomalyCount: 8 + ((i * 3 + i * i) % 8),
+    recallCompletionRate: 0.65 + ((i * 5 + 3) % 24) / 100,
+    unboundCount: 3 + ((i * 2 + 1) % 5),
+  }));
+
+  const byStore: Record<string, RiskTrendPoint[]> = {};
+  stores.forEach((store, si) => {
+    byStore[store.id] = MONTHS.map((month, mi) => ({
+      month,
+      anomalyCount: 1 + ((si * 2 + mi * 3 + si * mi) % 5),
+      recallCompletionRate: 0.55 + ((si * 7 + mi * 4 + 2) % 38) / 100,
+      unboundCount: ((si + mi * 2 + 1) % 4),
+    }));
+  });
+
+  const byBrand: Record<string, RiskTrendPoint[]> = {};
+  brands.forEach((brand, bi) => {
+    byBrand[brand.id] = MONTHS.map((month, mi) => ({
+      month,
+      anomalyCount: 1 + ((bi * 3 + mi * 2 + bi * mi + 1) % 5),
+      recallCompletionRate: 0.58 + ((bi * 5 + mi * 6 + 3) % 36) / 100,
+      unboundCount: ((bi + mi * 3 + 2) % 4),
+    }));
+  });
+
+  return { overall, byStore, byBrand };
+}
+
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   filters: {
     brandId: null,
@@ -180,6 +223,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   expiringStock: [],
   unboundBatches: [],
   drillDownStoreId: null,
+  trendView: 'overall',
+  selectedTrendStoreId: null,
+  selectedTrendBrandId: null,
+  trendData: buildMockTrendData(),
 
   setBrandFilter: (brandId) => {
     set((state) => ({ filters: { ...state.filters, brandId } }));
@@ -285,5 +332,25 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const unboundBatches = computeUnboundBatches(filteredBatches, filteredCases);
 
     set({ stats, storeUsage, expiringStock, unboundBatches });
+  },
+
+  setTrendView: (view) => {
+    set({ trendView: view });
+  },
+  setSelectedTrendStore: (storeId) => {
+    set({ selectedTrendStoreId: storeId });
+  },
+  setSelectedTrendBrand: (brandId) => {
+    set({ selectedTrendBrandId: brandId });
+  },
+  getTrendSeries: () => {
+    const { trendView, selectedTrendStoreId, selectedTrendBrandId, trendData } = get();
+    if (trendView === 'store' && selectedTrendStoreId) {
+      return trendData.byStore[selectedTrendStoreId] ?? [];
+    }
+    if (trendView === 'brand' && selectedTrendBrandId) {
+      return trendData.byBrand[selectedTrendBrandId] ?? [];
+    }
+    return trendData.overall;
   },
 }));

@@ -49,12 +49,18 @@ export interface PatientCase {
   surgeryDate: string;
   followUpStatus: 'pending' | 'completed' | 'failed';
   followUpDate?: string;
-  recallStatus?: 'none' | 'pending' | 'completed';
+  recallStatus?: 'none' | 'pending' | 'completed' | 'unreachable';
+  recallResult?: {
+    rechecked: boolean;
+    contactedAt?: string;
+    note?: string;
+  };
 }
 
 export type AnomalyType = 'missing' | 'duplicate' | 'expiry' | 'unbound';
 export type AnomalySeverity = 'high' | 'medium' | 'low';
 export type AnomalyStatus = 'open' | 'processing' | 'resolved';
+export type CorrectionStatus = 'pending_review' | 'rejected' | 'approved';
 
 export interface Message {
   id: string;
@@ -72,6 +78,21 @@ export interface Correction {
   attachmentName: string;
   submittedBy: string;
   submittedAt: string;
+  status: CorrectionStatus;
+  reviewNote?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+export interface ExpiryAnomalyDetail {
+  batchId: string;
+  batchNumber: string;
+  batchExpiryDate: string;
+  caseId: string;
+  caseSurgeryDate: string;
+  daysDiff: number;
+  expiredAtSurgery: boolean;
+  nearExpiryThreshold: number;
 }
 
 export interface Anomaly {
@@ -85,10 +106,25 @@ export interface Anomaly {
   patientName?: string;
   doctorName?: string;
   surgeryDate?: string;
+  batchExpiryDate?: string;
+  expiryDetail?: ExpiryAnomalyDetail;
   discoveredAt: string;
   status: AnomalyStatus;
   messages: Message[];
   corrections: Correction[];
+}
+
+export interface RiskTrendPoint {
+  month: string;
+  anomalyCount: number;
+  recallCompletionRate: number;
+  unboundCount: number;
+}
+
+export interface RiskTrendData {
+  byStore: Record<string, RiskTrendPoint[]>;
+  byBrand: Record<string, RiskTrendPoint[]>;
+  overall: RiskTrendPoint[];
 }
 
 export interface DashboardStats {
@@ -154,6 +190,8 @@ export interface BatchTrackingGroup {
   matchedStores: number;
   totalPatients: number;
   pendingRecall: number;
+  completedRecall: number;
+  unreachableRecall: number;
   storeDistributions: StoreDistribution[];
 }
 
@@ -186,7 +224,12 @@ export interface TrackingCase {
   nurseName: string;
   followUpStatus: 'pending' | 'completed' | 'failed';
   followUpDate?: string;
-  recallStatus: 'none' | 'pending' | 'completed';
+  recallStatus: 'none' | 'pending' | 'completed' | 'unreachable';
+  recallResult?: {
+    rechecked: boolean;
+    contactedAt?: string;
+    note?: string;
+  };
 }
 
 export interface AnomalyStats {

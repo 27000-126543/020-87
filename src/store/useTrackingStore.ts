@@ -11,8 +11,10 @@ interface TrackingState {
   searchBatch: (batchNumber: string) => void;
   searchBatches: (input: string) => void;
   clearSearch: () => void;
-  updateRecallStatus: (caseId: string, status: 'none' | 'pending' | 'completed') => void;
+  updateRecallStatus: (caseId: string, status: 'none' | 'pending' | 'completed' | 'unreachable') => void;
   batchRecall: () => void;
+  updateRecallResult: (caseId: string, result: { status: 'pending' | 'completed' | 'unreachable'; note?: string }) => void;
+  markUnreachable: (caseId: string) => void;
 }
 
 function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null {
@@ -64,6 +66,7 @@ function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null
           followUpStatus: caseItem.followUpStatus,
           followUpDate: caseItem.followUpDate,
           recallStatus: caseItem.recallStatus || 'none',
+          recallResult: caseItem.recallResult,
         });
       });
 
@@ -89,7 +92,9 @@ function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null
     spec: firstBatch.spec,
     matchedStores: groupedByStore.size,
     totalPatients: allCases.length,
-    pendingRecall: allCases.filter((c) => c.recallStatus === 'none').length,
+    pendingRecall: allCases.filter((c) => c.recallStatus === 'pending' || c.recallStatus === 'none').length,
+    completedRecall: allCases.filter((c) => c.recallStatus === 'completed').length,
+    unreachableRecall: allCases.filter((c) => c.recallStatus === 'unreachable').length,
     storeDistributions: sortedDistributions,
   };
 }
@@ -175,16 +180,16 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
         })),
       }));
 
-      const allCases = newResults.flatMap((g) => g.storeDistributions.flatMap((sd) => sd.cases));
-      const pendingCount = allCases.filter((c) => c.recallStatus === 'none').length;
-
       return {
-        trackingResult: newResults.map((g) => ({
-          ...g,
-          pendingRecall: g.storeDistributions
-            .flatMap((sd) => sd.cases)
-            .filter((c) => c.recallStatus === 'none').length,
-        })),
+        trackingResult: newResults.map((g) => {
+          const groupCases = g.storeDistributions.flatMap((sd) => sd.cases);
+          return {
+            ...g,
+            pendingRecall: groupCases.filter((c) => c.recallStatus === 'pending' || c.recallStatus === 'none').length,
+            completedRecall: groupCases.filter((c) => c.recallStatus === 'completed').length,
+            unreachableRecall: groupCases.filter((c) => c.recallStatus === 'unreachable').length,
+          };
+        }),
       };
     });
   },
@@ -199,18 +204,87 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
           ),
         }));
 
-        const pendingCount = newDistributions
-          .flatMap((sd) => sd.cases)
-          .filter((c) => c.recallStatus === 'none').length;
+        const groupCases = newDistributions.flatMap((sd) => sd.cases);
+        const pendingCount = groupCases.filter((c) => c.recallStatus === 'pending' || c.recallStatus === 'none').length;
+        const completedCount = groupCases.filter((c) => c.recallStatus === 'completed').length;
+        const unreachableCount = groupCases.filter((c) => c.recallStatus === 'unreachable').length;
 
         return {
           ...group,
           storeDistributions: newDistributions,
           pendingRecall: pendingCount,
+          completedRecall: completedCount,
+          unreachableRecall: unreachableCount,
         };
       });
 
       return { trackingResult: newResults };
     });
+  },
+
+  updateRecallResult: (caseId, result) => {
+    set((state) => {
+      const now = new Date().toISOString();
+
+      const newResults = state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) => {
+            if (c.caseId !== caseId) return c;
+
+            if (result.status === 'completed') {
+              return {
+                ...c,
+                recallStatus: result.status,
+                recallResult: {
+                  rechecked: true,
+                  contactedAt: now,
+                  note: result.note,
+                },
+              };
+            }
+
+            if (result.status === 'unreachable') {
+              return {
+                ...c,
+                recallStatus: result.status,
+                recallResult: {
+                  rechecked: false,
+                  contactedAt: now,
+                  note: result.note,
+                },
+              };
+            }
+
+            if (result.status === 'pending') {
+              return {
+                ...c,
+                recallStatus: result.status,
+                recallResult: undefined,
+              };
+            }
+
+            return c;
+          }),
+        })),
+      }));
+
+      return {
+        trackingResult: newResults.map((g) => {
+          const groupCases = g.storeDistributions.flatMap((sd) => sd.cases);
+          return {
+            ...g,
+            pendingRecall: groupCases.filter((c) => c.recallStatus === 'pending' || c.recallStatus === 'none').length,
+            completedRecall: groupCases.filter((c) => c.recallStatus === 'completed').length,
+            unreachableRecall: groupCases.filter((c) => c.recallStatus === 'unreachable').length,
+          };
+        }),
+      };
+    });
+  },
+
+  markUnreachable: (caseId) => {
+    get().updateRecallResult(caseId, { status: 'unreachable' });
   },
 }));

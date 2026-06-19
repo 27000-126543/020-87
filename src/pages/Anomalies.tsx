@@ -12,13 +12,16 @@ import {
   Filter,
   CheckCircle2,
   Paperclip,
-  CheckCircle
+  CheckCircle,
+  ThumbsUp,
+  ThumbsDown,
+  CalendarDays
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAnomalyStore } from '@/store/useAnomalyStore';
 import { stores } from '@/data';
 import { cn } from '@/lib/utils';
-import type { AnomalyType, Anomaly, AnomalyStatus } from '@/types';
+import type { AnomalyType, Anomaly, AnomalyStatus, CorrectionStatus } from '@/types';
 
 const anomalyTypeConfig: Record<AnomalyType, { label: string; icon: any; color: string; bg: string; border: string }> = {
   missing: {
@@ -63,6 +66,34 @@ const statusConfig: Record<AnomalyStatus, { label: string; variant: 'danger' | '
   resolved: { label: '已解决', variant: 'success' },
 };
 
+const correctionStatusConfig: Record<CorrectionStatus, { label: string; variant: 'success' | 'warning' | 'danger' }> = {
+  pending_review: { label: '待质控确认', variant: 'warning' },
+  rejected: { label: '已退回', variant: 'danger' },
+  approved: { label: '已通过', variant: 'success' },
+};
+
+function getCorrectionsSummary(corrections: Anomaly['corrections']): { label: string; variant: 'warning' | 'danger' | 'success' | 'default'; count: number } | null {
+  if (corrections.length === 0) return null;
+
+  const hasPending = corrections.some((c) => c.status === 'pending_review');
+  const hasApproved = corrections.some((c) => c.status === 'approved');
+  const hasRejected = corrections.some((c) => c.status === 'rejected');
+
+  if (hasPending) {
+    return { label: '待确认', variant: 'warning', count: corrections.length };
+  }
+  if (hasApproved && hasRejected) {
+    return { label: '部分通过', variant: 'warning', count: corrections.length };
+  }
+  if (hasApproved) {
+    return { label: '已通过', variant: 'success', count: corrections.length };
+  }
+  if (hasRejected) {
+    return { label: '已退回', variant: 'danger', count: corrections.length };
+  }
+  return { label: `${corrections.length}补正`, variant: 'default', count: corrections.length };
+}
+
 interface MessagePanelProps {
   anomaly: Anomaly | null;
   onClose: () => void;
@@ -73,7 +104,10 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
   const [message, setMessage] = useState('');
   const [correctionNote, setCorrectionNote] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
-  const { addCorrection, resolveAnomaly } = useAnomalyStore();
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
+  const [selectedCorrectionId, setSelectedCorrectionId] = useState<string | null>(null);
+  const { addCorrection, resolveAnomaly, rejectCorrection, approveCorrection } = useAnomalyStore();
 
   const handleSend = () => {
     if (message.trim()) {
@@ -98,10 +132,36 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
     resolveAnomaly(anomaly.id);
   };
 
+  const handleApprove = (correctionId: string) => {
+    if (!anomaly) return;
+    approveCorrection(anomaly.id, correctionId);
+  };
+
+  const handleOpenRejectDialog = (correctionId: string) => {
+    setSelectedCorrectionId(correctionId);
+    setRejectNote('');
+    setRejectDialogOpen(true);
+  };
+
+  const handleConfirmReject = () => {
+    if (!anomaly || !selectedCorrectionId || !rejectNote.trim()) return;
+    rejectCorrection(anomaly.id, selectedCorrectionId, rejectNote.trim());
+    setRejectDialogOpen(false);
+    setSelectedCorrectionId(null);
+    setRejectNote('');
+  };
+
+  const handleCancelReject = () => {
+    setRejectDialogOpen(false);
+    setSelectedCorrectionId(null);
+    setRejectNote('');
+  };
+
   if (!anomaly) return null;
 
   const store = stores.find((s) => s.id === anomaly.storeId);
   const typeConfig = anomalyTypeConfig[anomaly.type];
+  const hasApprovedCorrection = anomaly.corrections.some((c) => c.status === 'approved');
 
   return (
     <div className="fixed inset-y-0 right-0 w-96 bg-slate-800 border-l border-slate-700 shadow-2xl z-50 flex flex-col animate-[slideIn_0.3s_ease-out]">
@@ -111,7 +171,7 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           <p className="text-xs text-slate-400 mt-0.5">留言督办</p>
         </div>
         <div className="flex items-center gap-2">
-          {anomaly.status === 'processing' && anomaly.corrections.length > 0 && (
+          {anomaly.status === 'processing' && hasApprovedCorrection && (
             <button
               onClick={handleResolve}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
@@ -220,15 +280,85 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
             <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">补正记录</p>
             {anomaly.corrections.map((correction) => (
               <div key={correction.id} className="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 space-y-2">
-                <p className="text-sm text-slate-300">{correction.note}</p>
-                <div className="flex items-center gap-1.5 text-xs text-teal-400">
-                  <Paperclip className="w-3 h-3" />
-                  <span>{correction.attachmentName}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-slate-300">{correction.note}</p>
+                  <StatusBadge variant={correctionStatusConfig[correction.status].variant}>
+                    {correctionStatusConfig[correction.status].label}
+                  </StatusBadge>
                 </div>
+                {correction.attachmentName && (
+                  <div className="flex items-center gap-1.5 text-xs text-teal-400">
+                    <Paperclip className="w-3 h-3" />
+                    <span>{correction.attachmentName}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>{correction.submittedBy}</span>
                   <span>{correction.submittedAt}</span>
                 </div>
+
+                {correction.status === 'rejected' && correction.reviewNote && (
+                  <div className="p-2 bg-red-500/10 border border-red-500/30 rounded-md space-y-1">
+                    <p className="text-xs text-red-400 font-medium">
+                      {correction.reviewedBy} 退回 · {correction.reviewedAt}
+                    </p>
+                    <p className="text-xs text-red-300">{correction.reviewNote}</p>
+                  </div>
+                )}
+
+                {correction.status === 'approved' && correction.reviewedBy && (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+                    <ThumbsUp className="w-3 h-3" />
+                    <span>{correction.reviewedBy} 已通过 · {correction.reviewedAt}</span>
+                  </div>
+                )}
+
+                {correction.status === 'pending_review' && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={() => handleApprove(correction.id)}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs font-medium rounded-md transition-colors border border-emerald-500/30"
+                    >
+                      <ThumbsUp className="w-3 h-3" />
+                      <span>通过</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenRejectDialog(correction.id)}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs font-medium rounded-md transition-colors border border-red-500/30"
+                    >
+                      <ThumbsDown className="w-3 h-3" />
+                      <span>退回</span>
+                    </button>
+                  </div>
+                )}
+
+                {rejectDialogOpen && selectedCorrectionId === correction.id && (
+                  <div className="p-3 bg-slate-800 border border-slate-600 rounded-md space-y-2">
+                    <p className="text-xs font-medium text-slate-300">退回原因</p>
+                    <textarea
+                      value={rejectNote}
+                      onChange={(e) => setRejectNote(e.target.value)}
+                      placeholder="请输入退回原因..."
+                      rows={2}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/20 transition-all"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={handleCancelReject}
+                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-md transition-colors"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={handleConfirmReject}
+                        disabled={!rejectNote.trim()}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-md transition-colors"
+                      >
+                        确认退回
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -521,6 +651,7 @@ export function Anomalies() {
                 const statConfig = statusConfig[anomaly.status];
                 const store = stores.find((s) => s.id === anomaly.storeId);
                 const Icon = typeConfig.icon;
+                const correctionsSummary = getCorrectionsSummary(anomaly.corrections);
 
                 return (
                   <tr
@@ -566,20 +697,54 @@ export function Anomalies() {
                       )}
                     </td>
                     <td className="px-5 py-4 max-w-xs">
-                      <p className="text-sm text-slate-400 truncate">{anomaly.description}</p>
+                      <p className="text-sm text-slate-300">{anomaly.description}</p>
+                      {anomaly.type === 'expiry' && (
+                        <div className="mt-1.5 space-y-0.5">
+                          {anomaly.expiryDetail ? (
+                            <>
+                              <div className="flex items-center gap-1 text-xs text-slate-500">
+                                <CalendarDays className="w-3 h-3" />
+                                <span>手术日期: {anomaly.expiryDetail.caseSurgeryDate}</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-xs text-slate-500">
+                                <CalendarDays className="w-3 h-3" />
+                                <span>批次有效期: {anomaly.expiryDetail.batchExpiryDate}</span>
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                {anomaly.expiryDetail.daysDiff}天 · {anomaly.expiryDetail.expiredAtSurgery ? '手术时已过期' : '距过期尚远'}
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              {anomaly.surgeryDate && (
+                                <div className="flex items-center gap-1 text-xs text-slate-500">
+                                  <CalendarDays className="w-3 h-3" />
+                                  <span>手术日期: {anomaly.surgeryDate}</span>
+                                </div>
+                              )}
+                              {anomaly.batchExpiryDate && (
+                                <div className="flex items-center gap-1 text-xs text-slate-500">
+                                  <CalendarDays className="w-3 h-3" />
+                                  <span>批次有效期: {anomaly.batchExpiryDate}</span>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-4">
                       <span className="text-sm text-slate-400">{anomaly.discoveredAt}</span>
                     </td>
                     <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <StatusBadge variant={statConfig.variant}>
                           {statConfig.label}
                         </StatusBadge>
-                        {anomaly.corrections.length > 0 && (
-                          <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium bg-teal-500/20 text-teal-400 rounded-full">
-                            {anomaly.corrections.length}补正
-                          </span>
+                        {correctionsSummary && (
+                          <StatusBadge variant={correctionsSummary.variant}>
+                            {correctionsSummary.label}
+                          </StatusBadge>
                         )}
                       </div>
                     </td>

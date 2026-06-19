@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { anomalies as initialAnomalies, stores } from '@/data';
-import type { Anomaly, AnomalyType, AnomalyStatus, AnomalyStats, Message, Correction } from '@/types';
+import type { Anomaly, AnomalyType, AnomalyStatus, AnomalyStats, Message, Correction, CorrectionStatus } from '@/types';
 
 interface AnomalyState {
   anomalies: Anomaly[];
@@ -15,6 +15,8 @@ interface AnomalyState {
   setActiveAnomaly: (id: string | null) => void;
   addMessage: (anomalyId: string, content: string, sender: string) => void;
   addCorrection: (anomalyId: string, note: string, attachmentName: string, submittedBy: string) => void;
+  rejectCorrection: (anomalyId: string, correctionId: string, reviewNote: string) => void;
+  approveCorrection: (anomalyId: string, correctionId: string) => void;
   resolveAnomaly: (anomalyId: string) => void;
   updateAnomalyStatus: (anomalyId: string, status: AnomalyStatus) => void;
   getFilteredAnomalies: () => Anomaly[];
@@ -76,6 +78,7 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
       attachmentName,
       submittedBy,
       submittedAt: new Date().toLocaleString('zh-CN'),
+      status: 'pending_review',
     };
 
     set((state) => ({
@@ -85,6 +88,57 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
               ...a,
               status: 'processing' as AnomalyStatus,
               corrections: [...a.corrections, newCorrection],
+            }
+          : a
+      ),
+    }));
+
+    get().computeStats();
+  },
+
+  rejectCorrection: (anomalyId, correctionId, reviewNote) => {
+    set((state) => ({
+      anomalies: state.anomalies.map((a) =>
+        a.id === anomalyId
+          ? {
+              ...a,
+              status: 'processing' as AnomalyStatus,
+              corrections: a.corrections.map((c) =>
+                c.id === correctionId
+                  ? {
+                      ...c,
+                      status: 'rejected' as CorrectionStatus,
+                      reviewNote,
+                      reviewedBy: '质控总部',
+                      reviewedAt: new Date().toLocaleString('zh-CN'),
+                    }
+                  : c
+              ),
+            }
+          : a
+      ),
+    }));
+
+    get().computeStats();
+  },
+
+  approveCorrection: (anomalyId, correctionId) => {
+    set((state) => ({
+      anomalies: state.anomalies.map((a) =>
+        a.id === anomalyId
+          ? {
+              ...a,
+              status: 'processing' as AnomalyStatus,
+              corrections: a.corrections.map((c) =>
+                c.id === correctionId
+                  ? {
+                      ...c,
+                      status: 'approved' as CorrectionStatus,
+                      reviewedBy: '质控总部',
+                      reviewedAt: new Date().toLocaleString('zh-CN'),
+                    }
+                  : c
+              ),
             }
           : a
       ),
