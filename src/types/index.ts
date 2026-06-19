@@ -65,6 +65,15 @@ export interface Message {
   createdAt: string;
 }
 
+export interface Correction {
+  id: string;
+  anomalyId: string;
+  note: string;
+  attachmentName: string;
+  submittedBy: string;
+  submittedAt: string;
+}
+
 export interface Anomaly {
   id: string;
   type: AnomalyType;
@@ -74,9 +83,12 @@ export interface Anomaly {
   description: string;
   caseId?: string;
   patientName?: string;
+  doctorName?: string;
+  surgeryDate?: string;
   discoveredAt: string;
   status: AnomalyStatus;
   messages: Message[];
+  corrections: Correction[];
 }
 
 export interface DashboardStats {
@@ -122,6 +134,27 @@ export interface UnboundBatchItem {
   storeId: string;
   storeName: string;
   nurseName?: string;
+}
+
+export interface StoreDrillDownData {
+  storeId: string;
+  storeName: string;
+  city: string;
+  usageCount: number;
+  unboundBatches: UnboundBatchItem[];
+  expiringStock: ExpiringStockItem[];
+  anomalyList: Anomaly[];
+}
+
+export interface BatchTrackingGroup {
+  batchNumber: string;
+  brandName: string;
+  productName: string;
+  spec: string;
+  matchedStores: number;
+  totalPatients: number;
+  pendingRecall: number;
+  storeDistributions: StoreDistribution[];
 }
 
 export interface TrackingResult {

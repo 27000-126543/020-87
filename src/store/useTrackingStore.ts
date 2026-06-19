@@ -1,20 +1,22 @@
 import { create } from 'zustand';
 import { implantBatches, stores, patientCases, doctors, nurses, brands } from '@/data';
-import type { TrackingResult, StoreDistribution, TrackingCase } from '@/types';
+import type { BatchTrackingGroup, StoreDistribution, TrackingCase } from '@/types';
 
 interface TrackingState {
   searchKeyword: string;
-  trackingResult: TrackingResult | null;
+  trackingResult: BatchTrackingGroup[];
   searchHistory: string[];
   isSearching: boolean;
   setSearchKeyword: (keyword: string) => void;
   searchBatch: (batchNumber: string) => void;
+  searchBatches: (input: string) => void;
   clearSearch: () => void;
   updateRecallStatus: (caseId: string, status: 'none' | 'pending' | 'completed') => void;
+  batchRecall: () => void;
 }
 
-function searchBatchNumber(keyword: string): TrackingResult | null {
-  const keywordLower = keyword.toLowerCase().trim();
+function buildBatchTrackingGroup(batchNumber: string): BatchTrackingGroup | null {
+  const keywordLower = batchNumber.toLowerCase().trim();
   if (!keywordLower) return null;
 
   const matchedBatches = implantBatches.filter((b) =>
@@ -77,19 +79,24 @@ function searchBatchNumber(keyword: string): TrackingResult | null {
     });
   });
 
+  const sortedDistributions = storeDistributions.sort((a, b) => b.usedQuantity - a.usedQuantity);
+  const allCases = sortedDistributions.flatMap((sd) => sd.cases);
+
   return {
     batchNumber: firstBatch.batchNumber,
     brandName: brand?.name || '-',
     productName: firstBatch.productName,
     spec: firstBatch.spec,
-    totalQuantity: matchedBatches.reduce((sum, b) => sum + b.quantity, 0),
-    storeDistributions: storeDistributions.sort((a, b) => b.usedQuantity - a.usedQuantity),
+    matchedStores: groupedByStore.size,
+    totalPatients: allCases.length,
+    pendingRecall: allCases.filter((c) => c.recallStatus === 'none').length,
+    storeDistributions: sortedDistributions,
   };
 }
 
 export const useTrackingStore = create<TrackingState>((set, get) => ({
   searchKeyword: '',
-  trackingResult: null,
+  trackingResult: [],
   searchHistory: ['NB-2025-0315', 'STM-2025-0620', 'OS-2025-0228'],
   isSearching: false,
 
@@ -99,7 +106,8 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
 
   searchBatch: (batchNumber) => {
     set({ isSearching: true });
-    const result = searchBatchNumber(batchNumber);
+    const group = buildBatchTrackingGroup(batchNumber);
+    const results = group ? [group] : [];
 
     set((state) => {
       const history = state.searchHistory.filter((h) => h !== batchNumber);
@@ -107,7 +115,7 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
       const newHistory = history.slice(0, 10);
 
       return {
-        trackingResult: result,
+        trackingResult: results,
         searchKeyword: batchNumber,
         searchHistory: newHistory,
         isSearching: false,
@@ -115,27 +123,94 @@ export const useTrackingStore = create<TrackingState>((set, get) => ({
     });
   },
 
+  searchBatches: (input) => {
+    set({ isSearching: true });
+
+    const batchNumbers = input
+      .split(/[,，\n]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    const uniqueBatchNumbers = [...new Set(batchNumbers)];
+
+    const results: BatchTrackingGroup[] = [];
+    uniqueBatchNumbers.forEach((bn) => {
+      const group = buildBatchTrackingGroup(bn);
+      if (group) {
+        results.push(group);
+      }
+    });
+
+    set((state) => {
+      const history = [...state.searchHistory];
+      uniqueBatchNumbers.forEach((bn) => {
+        const idx = history.indexOf(bn);
+        if (idx !== -1) history.splice(idx, 1);
+        history.unshift(bn);
+      });
+      const newHistory = history.slice(0, 10);
+
+      return {
+        trackingResult: results,
+        searchKeyword: input,
+        searchHistory: newHistory,
+        isSearching: false,
+      };
+    });
+  },
+
   clearSearch: () => {
-    set({ trackingResult: null, searchKeyword: '' });
+    set({ trackingResult: [], searchKeyword: '' });
   },
 
   updateRecallStatus: (caseId, status) => {
     set((state) => {
-      if (!state.trackingResult) return state;
-
-      const newDistributions = state.trackingResult.storeDistributions.map((sd) => ({
-        ...sd,
-        cases: sd.cases.map((c) =>
-          c.caseId === caseId ? { ...c, recallStatus: status } : c
-        ),
+      const newResults = state.trackingResult.map((group) => ({
+        ...group,
+        storeDistributions: group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            c.caseId === caseId ? { ...c, recallStatus: status } : c
+          ),
+        })),
       }));
 
+      const allCases = newResults.flatMap((g) => g.storeDistributions.flatMap((sd) => sd.cases));
+      const pendingCount = allCases.filter((c) => c.recallStatus === 'none').length;
+
       return {
-        trackingResult: {
-          ...state.trackingResult,
-          storeDistributions: newDistributions,
-        },
+        trackingResult: newResults.map((g) => ({
+          ...g,
+          pendingRecall: g.storeDistributions
+            .flatMap((sd) => sd.cases)
+            .filter((c) => c.recallStatus === 'none').length,
+        })),
       };
+    });
+  },
+
+  batchRecall: () => {
+    set((state) => {
+      const newResults = state.trackingResult.map((group) => {
+        const newDistributions = group.storeDistributions.map((sd) => ({
+          ...sd,
+          cases: sd.cases.map((c) =>
+            c.recallStatus === 'none' ? { ...c, recallStatus: 'pending' as const } : c
+          ),
+        }));
+
+        const pendingCount = newDistributions
+          .flatMap((sd) => sd.cases)
+          .filter((c) => c.recallStatus === 'none').length;
+
+        return {
+          ...group,
+          storeDistributions: newDistributions,
+          pendingRecall: pendingCount,
+        };
+      });
+
+      return { trackingResult: newResults };
     });
   },
 }));

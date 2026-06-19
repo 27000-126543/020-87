@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { anomalies as initialAnomalies, stores } from '@/data';
-import type { Anomaly, AnomalyType, AnomalyStatus, AnomalyStats, Message } from '@/types';
+import type { Anomaly, AnomalyType, AnomalyStatus, AnomalyStats, Message, Correction } from '@/types';
 
 interface AnomalyState {
   anomalies: Anomaly[];
@@ -14,6 +14,8 @@ interface AnomalyState {
   setSelectedStatus: (status: AnomalyStatus | null) => void;
   setActiveAnomaly: (id: string | null) => void;
   addMessage: (anomalyId: string, content: string, sender: string) => void;
+  addCorrection: (anomalyId: string, note: string, attachmentName: string, submittedBy: string) => void;
+  resolveAnomaly: (anomalyId: string) => void;
   updateAnomalyStatus: (anomalyId: string, status: AnomalyStatus) => void;
   getFilteredAnomalies: () => Anomaly[];
   computeStats: () => void;
@@ -63,6 +65,40 @@ export const useAnomalyStore = create<AnomalyState>((set, get) => ({
       ),
     }));
 
+    get().computeStats();
+  },
+
+  addCorrection: (anomalyId, note, attachmentName, submittedBy) => {
+    const newCorrection: Correction = {
+      id: `cr${Date.now()}`,
+      anomalyId,
+      note,
+      attachmentName,
+      submittedBy,
+      submittedAt: new Date().toLocaleString('zh-CN'),
+    };
+
+    set((state) => ({
+      anomalies: state.anomalies.map((a) =>
+        a.id === anomalyId
+          ? {
+              ...a,
+              status: 'processing' as AnomalyStatus,
+              corrections: [...a.corrections, newCorrection],
+            }
+          : a
+      ),
+    }));
+
+    get().computeStats();
+  },
+
+  resolveAnomaly: (anomalyId) => {
+    set((state) => ({
+      anomalies: state.anomalies.map((a) =>
+        a.id === anomalyId ? { ...a, status: 'resolved' as AnomalyStatus } : a
+      ),
+    }));
     get().computeStats();
   },
 

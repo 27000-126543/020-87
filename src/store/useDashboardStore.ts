@@ -6,6 +6,7 @@ import type {
   ExpiringStockItem,
   UnboundBatchItem,
   FilterState,
+  StoreDrillDownData,
 } from '@/types';
 import { daysFromNow, daysBetween } from '@/utils/date';
 
@@ -15,9 +16,12 @@ interface DashboardState {
   storeUsage: StoreUsageData[];
   expiringStock: ExpiringStockItem[];
   unboundBatches: UnboundBatchItem[];
+  drillDownStoreId: string | null;
   setBrandFilter: (brandId: string | null) => void;
   setStoreFilter: (storeId: string | null) => void;
   setDoctorFilter: (doctorId: string | null) => void;
+  setDrillDownStore: (storeId: string | null) => void;
+  getStoreDrillDown: (storeId: string) => StoreDrillDownData;
   computeDashboardData: () => void;
 }
 
@@ -175,6 +179,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   storeUsage: [],
   expiringStock: [],
   unboundBatches: [],
+  drillDownStoreId: null,
 
   setBrandFilter: (brandId) => {
     set((state) => ({ filters: { ...state.filters, brandId } }));
@@ -188,17 +193,47 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     set((state) => ({ filters: { ...state.filters, doctorId } }));
     get().computeDashboardData();
   },
+  setDrillDownStore: (storeId) => {
+    set({ drillDownStoreId: storeId });
+  },
+
+  getStoreDrillDown: (storeId) => {
+    const store = stores.find((s) => s.id === storeId);
+    if (!store) {
+      return {
+        storeId,
+        storeName: '',
+        city: '',
+        usageCount: 0,
+        unboundBatches: [],
+        expiringStock: [],
+        anomalyList: [],
+      };
+    }
+
+    const storeBatches = implantBatches.filter((b) => b.storeId === storeId);
+    const usageCount = storeBatches
+      .filter((b) => b.status === 'used')
+      .reduce((sum, b) => sum + b.quantity, 0);
+
+    const storeCases = patientCases.filter((c) => c.storeId === storeId);
+    const unboundBatches = computeUnboundBatches(storeBatches, storeCases);
+    const expiringStock = computeExpiringStock(storeBatches);
+    const anomalyList = anomalies.filter((a) => a.storeId === storeId);
+
+    return {
+      storeId: store.id,
+      storeName: store.name,
+      city: store.city,
+      usageCount,
+      unboundBatches,
+      expiringStock,
+      anomalyList,
+    };
+  },
 
   computeDashboardData: () => {
     const { filters } = get();
-
-    let filteredBatches = [...implantBatches];
-    if (filters.storeId) {
-      filteredBatches = filteredBatches.filter((b) => b.storeId === filters.storeId);
-    }
-    if (filters.brandId) {
-      filteredBatches = filteredBatches.filter((b) => b.brandId === filters.brandId);
-    }
 
     let filteredCases = [...patientCases];
     if (filters.storeId) {
@@ -207,6 +242,24 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     if (filters.doctorId) {
       filteredCases = filteredCases.filter((c) => c.doctorId === filters.doctorId);
     }
+
+    let doctorBatchIds: string[] | null = null;
+    if (filters.doctorId) {
+      const doctorCases = patientCases.filter((c) => c.doctorId === filters.doctorId);
+      doctorBatchIds = doctorCases.map((c) => c.implantBatchId);
+    }
+
+    let filteredBatches = [...implantBatches];
+    if (filters.storeId) {
+      filteredBatches = filteredBatches.filter((b) => b.storeId === filters.storeId);
+    }
+    if (filters.brandId) {
+      filteredBatches = filteredBatches.filter((b) => b.brandId === filters.brandId);
+    }
+    if (doctorBatchIds) {
+      filteredBatches = filteredBatches.filter((b) => doctorBatchIds!.includes(b.id));
+    }
+
     if (filters.brandId) {
       const batchIds = filteredBatches.map((b) => b.id);
       filteredCases = filteredCases.filter((c) => batchIds.includes(c.implantBatchId));
@@ -215,6 +268,15 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     let filteredAnomalies = [...anomalies];
     if (filters.storeId) {
       filteredAnomalies = filteredAnomalies.filter((a) => a.storeId === filters.storeId);
+    }
+    if (filters.doctorId) {
+      const doctor = doctors.find((d) => d.id === filters.doctorId);
+      const doctorCaseIds = new Set(filteredCases.map((c) => c.id));
+      filteredAnomalies = filteredAnomalies.filter((a) => {
+        if (doctor && a.doctorName === doctor.name) return true;
+        if (a.caseId && doctorCaseIds.has(a.caseId)) return true;
+        return false;
+      });
     }
 
     const stats = computeStats(filteredBatches, filteredCases, filteredAnomalies);

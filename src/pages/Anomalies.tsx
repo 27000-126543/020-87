@@ -10,7 +10,9 @@ import {
   X,
   ChevronDown,
   Filter,
-  CheckCircle2
+  CheckCircle2,
+  Paperclip,
+  CheckCircle
 } from 'lucide-react';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAnomalyStore } from '@/store/useAnomalyStore';
@@ -69,12 +71,31 @@ interface MessagePanelProps {
 
 function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
   const [message, setMessage] = useState('');
+  const [correctionNote, setCorrectionNote] = useState('');
+  const [attachmentName, setAttachmentName] = useState('');
+  const { addCorrection, resolveAnomaly } = useAnomalyStore();
 
   const handleSend = () => {
     if (message.trim()) {
       onSendMessage(message.trim());
       setMessage('');
     }
+  };
+
+  const handleAttachFile = () => {
+    setAttachmentName('出库单_补正.pdf');
+  };
+
+  const handleSubmitCorrection = () => {
+    if (!anomaly || !correctionNote.trim()) return;
+    addCorrection(anomaly.id, correctionNote.trim(), attachmentName, '门店负责人');
+    setCorrectionNote('');
+    setAttachmentName('');
+  };
+
+  const handleResolve = () => {
+    if (!anomaly) return;
+    resolveAnomaly(anomaly.id);
   };
 
   if (!anomaly) return null;
@@ -89,12 +110,23 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
           <h3 className="font-semibold text-white">异常详情</h3>
           <p className="text-xs text-slate-400 mt-0.5">留言督办</p>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors"
-        >
-          <X className="w-5 h-5 text-slate-400" />
-        </button>
+        <div className="flex items-center gap-2">
+          {anomaly.status === 'processing' && anomaly.corrections.length > 0 && (
+            <button
+              onClick={handleResolve}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>关闭异常</span>
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
+        </div>
       </div>
 
       <div className="p-4 border-b border-slate-700 space-y-3">
@@ -182,9 +214,55 @@ function MessagePanel({ anomaly, onClose, onSendMessage }: MessagePanelProps) {
             </div>
           ))
         )}
+
+        {anomaly.corrections.length > 0 && (
+          <div className="space-y-2 pt-3 border-t border-slate-700/50">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">补正记录</p>
+            {anomaly.corrections.map((correction) => (
+              <div key={correction.id} className="p-3 bg-slate-900/50 rounded-lg border border-slate-700/50 space-y-2">
+                <p className="text-sm text-slate-300">{correction.note}</p>
+                <div className="flex items-center gap-1.5 text-xs text-teal-400">
+                  <Paperclip className="w-3 h-3" />
+                  <span>{correction.attachmentName}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>{correction.submittedBy}</span>
+                  <span>{correction.submittedAt}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="p-4 border-t border-slate-700">
+      <div className="p-4 border-t border-slate-700 space-y-3">
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">门店补正</p>
+          <textarea
+            value={correctionNote}
+            onChange={(e) => setCorrectionNote(e.target.value)}
+            placeholder="输入补正说明..."
+            rows={2}
+            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 resize-none focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/20 transition-all"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAttachFile}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+              <span>{attachmentName || '上传出库单/病例截图'}</span>
+            </button>
+            <button
+              onClick={handleSubmitCorrection}
+              disabled={!correctionNote.trim()}
+              className="ml-auto px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              提交补正
+            </button>
+          </div>
+        </div>
+
         <div className="flex items-end gap-2">
           <textarea
             value={message}
@@ -420,7 +498,7 @@ export function Anomalies() {
                   门店
                 </th>
                 <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-5 py-4">
-                  批号/患者
+                  病例/批号
                 </th>
                 <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider px-5 py-4">
                   描述
@@ -471,13 +549,19 @@ export function Anomalies() {
                       <p className="text-xs text-slate-500">{store?.city}</p>
                     </td>
                     <td className="px-5 py-4">
+                      {anomaly.patientName && (
+                        <p className="text-sm text-slate-300">
+                          {anomaly.patientName}
+                          {anomaly.doctorName && <span className="text-slate-500 ml-1">({anomaly.doctorName})</span>}
+                        </p>
+                      )}
                       {anomaly.batchNumber && (
                         <p className="text-sm font-mono text-teal-400">{anomaly.batchNumber}</p>
                       )}
-                      {anomaly.patientName && (
-                        <p className="text-sm text-slate-300">{anomaly.patientName}</p>
+                      {anomaly.surgeryDate && (
+                        <p className="text-xs text-slate-500">{anomaly.surgeryDate}</p>
                       )}
-                      {!anomaly.batchNumber && !anomaly.patientName && (
+                      {!anomaly.patientName && !anomaly.batchNumber && (
                         <span className="text-sm text-slate-500">-</span>
                       )}
                     </td>
@@ -488,9 +572,16 @@ export function Anomalies() {
                       <span className="text-sm text-slate-400">{anomaly.discoveredAt}</span>
                     </td>
                     <td className="px-5 py-4">
-                      <StatusBadge variant={statConfig.variant}>
-                        {statConfig.label}
-                      </StatusBadge>
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge variant={statConfig.variant}>
+                          {statConfig.label}
+                        </StatusBadge>
+                        {anomaly.corrections.length > 0 && (
+                          <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium bg-teal-500/20 text-teal-400 rounded-full">
+                            {anomaly.corrections.length}补正
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-4">
                       <button
